@@ -1,0 +1,3314 @@
+' Taken from Personal.xls Macro Sheet
+
+' =================================================================================================
+' These are command buttons, to automate the advanced filter features.
+' Generally they're moved into a spreadsheet, and the parameters at the top are set to 
+' cells in the spreadsheet. Basically Button 1 filters a data range, copying cells into extract 
+' range, based on values in criteria range. Button 1 filters, Button 2 sorts, and button 3 clears 
+' the criteria and extract ranges (or can if set up properly). 
+' =================================================================================================
+
+' INSTALLATION PROCESS: 
+' From the developer menu, add 3 command buttons, then click on 1 to go to the code page. Copy all this code in. 
+' Next, in the spreadsheet copy the data range headers from the data range to Criteria and Extract ranges. 
+' Format the cells in the criteria ranges so text is centered and bolded. 
+' Choose approprate background colors for the criteria range and the sort specification range. 
+'  Try to use a background for the sort range which is the same as the color for the sort command button, 
+'  and for the criteria range and filter button try to match colors there as well. 
+' Set up cells to contain the formulas which calculate 
+'   - the number of rows in the data range, 
+'   - the number of columns used, 
+'   - the number of criteria rows, and  
+'   - the number of rows extracted by the filter action.  
+' Change the values in the code lines below to reference the cells with appropriate count formulas 
+' Lastly, change the MaxCritRows to specify the maximum number of criteria rows 
+' Then, uncomment the lines that are commented out which start with 'CommandButton1', 'CommandButton2', and 'CommandButton3'
+' Compile the code, and it should be good to go
+' NB: The formula below should be added to every cell above the criteria cells to provide a max number of criteria rows 
+'     (In the example below, formulas need to be added to each cell in range H6:K6 where there is a "CF1-4") 
+       for Cell H6:	=max(if(isblank(H8),0,1),if(isblank(H9),0,2),if(isblank(H10),0,3))  
+
+' This is the basic spreadsheet setup:
+'   Row     Column ID>>    A 	  B      C      D                                  H      I      J      K
+'	 1 					 'Row#   =counta(A8:A2000)
+'    2                   'Col#   =counta(A7:E7)
+'    3                   'Crit#  =max(h6:k6)   
+'    4                   'Extrct# =counta(h12:h2000)
+'    5	 	
+'    6												                              CF1   CF2    CF3      CF4
+'    7      DATA RANGE:   Title FName  SecNm   Suffix           Criteria Range > Title FName  SecNm   Suffix 
+'    8                    Mr    John   Henry    Sr               Criteria Row1 > ='Mr'                        
+'    9                    Mr    Jake   Thomas   Jr               Criteria Row2 >                       ='*r' 
+'   10                    Ms    Jean   Martin                  Values for Sort >  -1     2               3
+'   11                    Mr    Tim    Fahey    Sr              Extract Range  > Title FName  SecNm   Suffix
+'   12                    Ms    Eileen Hacky                                     This is where the filtered data will go
+'   13                    Mr    Matt   Fatty    II
+
+Option Explicit
+Const RowCntLoc = "B1"        'in example above, would reference cell B1
+Const ColCntLoc = "B2"        'how many columns are in the range to be filtered / sorted? in example above, there are 4, as calc'd in B2
+Const CriteriaCntLoc = "B3"   'how many rows are in the criteria range? in example above, use formula in cell B3 (currently 6)
+Const RowsExtrCnt = "B4"      'changes with each filter action. suitable formula would be =counta(H12:H2000)
+Const InitHdr = "A7"         'in example above, would reference cell A7 ("Title")
+Const InitCrit = "H8"         'in example above, would reference cell H8 
+Const InitExtr = "H11"        'in example above, would reference cell H11
+Const InitSortSpecs = "H10"   'in example above, sort specification range is H10:K10, and starts with cell H10 which has a value of -1, 
+'                               which means that it is sorted first, but in reverse order. Sort function takes up to 3 sort fields
+Const MaxCritRows = 2         'in example above, there are 2 criteria rows, followed by the row for sort information
+
+Const MyBlue = &HFFFFC0
+Const MyOrange = &HC0E0FF
+'Const MyOrange = &HC0E0FF
+'Const MyBlue = &HFFFFC0
+'const MyGreen = &H00C0FFC0&
+'const MyRed = &H00C0C0FF&
+'const MyYellow = &H0000FFFF&
+'const MyCyan = &H00FF80FF&
+
+Sub CommandButton1_Click()
+On Error GoTo ErrorHandler
+'Filter function
+Dim CriteriaRng As Range
+Dim ExtractRng As Range
+Dim DataRng As Range
+'Dim obTimer As New CHighResTimer
+'Dim MyTime As Double
+Dim CurAddr As String
+Dim ColCnt As Byte
+Dim CriteriaCnt As Byte
+Dim DataCnt As Long
+Const DumpUnique = True
+'Const DenominationLoc = "C1"
+'Const FilterDenomLoc = "L15"
+    'obTimer.StartTimer
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.StatusBar = ""
+
+    CurAddr = Selection.Address
+'    commandbutton1.Caption = "FILTER"
+'    commandbutton1.Font = "Times New Roman"
+'    commandbutton1.Font.bold = true
+'    commandbutton1.FontSize = 11
+'    commandbutton1.BackColor = MyBlue
+    '*************************************
+    DataCnt = Range(RowCntLoc).Value
+    ColCnt = Range(ColCntLoc).Value
+    CriteriaCnt = Range(CriteriaCntLoc).Value
+    '********************************
+    If CriteriaCnt > 6 Then 'the way the spreadsheet is set up, there are too many criteria rows
+        MsgBox "Too many criteria lines.  Please restructure spreadsheet, and adjust the macro!"
+        Return
+    End If
+
+    If DataCnt = 1 Then
+        MsgBox "Can't run this macro without valid data!"
+    Else
+        'Now define the Data Range, the Criteria Range, and the Extract Range
+        Set DataRng = Range(InitHdr, Range(InitHdr).Offset(DataCnt - 1, ColCnt - 1))
+        DataRng.Select
+        Set CriteriaRng = Range(InitCrit, Range(InitCrit).Offset(CriteriaCnt, ColCnt - 1))
+        CriteriaRng.Select
+        Set ExtractRng = Range(InitExtr, Range(InitExtr).Offset(0, ColCnt - 1))
+        ExtractRng.Select
+        'Either one of the following lines works!!!
+        DataRng.AdvancedFilter xlFilterCopy, CriteriaRng, ExtractRng, False
+        'DataRng.AdvancedFilter Action:=xlFilterCopy, criteriarange:=CriteriaRng, copytorange:=ExtractRng, unique:=dumpunique
+    End If
+    'obTimer.StopTimer
+    'MyTime = obTimer.Elapsed
+    'Application.StatusBar = "Filter process completed in " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Set DataRng = Nothing
+    Set CriteriaRng = Nothing
+    Set ExtractRng = Nothing
+    Range(CurAddr).Select
+    'Range(FilterDenomLoc).Value = Range(DenominationLoc).Value
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    'Set obTimer = Nothing
+    
+End Sub
+
+Sub CommandButton2_Click()
+On Error GoTo ErrorHandler
+'sort function
+Dim CurAddr As String
+Dim ExtractRng As Range
+Dim SortSpecs As Range
+Dim ColCnt As Integer
+Dim RowCnt As Long
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.StatusBar = ""
+    
+    CurAddr = Selection.Address
+    
+'    commandbutton2.Caption = "SORT"
+'    commandbutton2.Font = "Times New Roman"
+'    commandbutton2.Font.bold = true
+'    commandbutton2.FontSize = 11
+'    commandbutton2.BackColor = MyOrange
+    
+    ColCnt = Range(ColCntLoc).Value
+    RowCnt = Range(RowsExtrCnt).Value
+    Set SortSpecs = Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1))
+    SortSpecs.Select
+    Set ExtractRng = Range(InitExtr, Range(InitExtr).Offset(RowCnt, ColCnt - 1))
+    ExtractRng.Select
+    SortMyRange SortSpecs, ExtractRng ') ', curaddripExitLoc As Range)
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+    
+MyExit:
+    Set ExtractRng = Nothing
+    Set SortSpecs = Nothing
+    Range(CurAddr).Select
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+
+Private Sub CommandButton3_Click()
+'clear function
+Dim ColCnt As Integer
+    ColCnt = Range(ColCntLoc).Value
+    Application.StatusBar = ""
+    
+'    commandbutton3.Caption = "Clear"
+'    commandbutton3.Font = "Times New Roman"
+'    commandbutton3.Font.bold = true
+'    commandbutton3.FontSize = 11
+'    commandbutton3.BackColor = Myred
+
+    Range(Range(InitCrit).Offset(1, 0), Range(InitCrit).Offset(MaxCritRows, ColCnt - 1)).Select 'clear criteria info
+    Range(Range(InitCrit).Offset(1, 0), Range(InitCrit).Offset(MaxCritRows, ColCnt - 1)).ClearContents 'clear criteria info
+    Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1)).Select                              'clear sort parms
+    Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1)).ClearContents                              'clear sort parms
+End Sub
+
+Sub SortMyRange(ByRef ipSortSpecs As Range, ByRef ipSortData As Range, Optional ByRef ipExitLoc As Range)
+'Written on 12/22/11/ by cfahey
+'this attempts to streamline / standardize the sort function across the various spreadsheets
+'requires function DUPLICATESINSORT
+Dim MyFld1 As String
+Dim MyFld2 As String
+Dim MyFld3 As String
+Dim PrimeOffset As Integer
+Dim ColumnsCntr As Byte
+Dim SortSpecSum As Integer
+Dim RowsCntr As Long
+Dim MyOrder1 As Byte
+Dim MyOrder2 As Byte
+Dim MyOrder3 As Byte
+Dim i As Byte
+Dim FieldCount As Byte
+Dim test1 As String
+Const SrtAscending = 1
+Const SrtDescending = 2
+
+    ColumnsCntr = ipSortData.Columns.Count 'Range(NumOfCols).Value
+    RowsCntr = ipSortData.Rows.Count ' Range(SortRows).Value
+
+    ' Too many parameters? send err msg
+    ipSortSpecs.Select
+    FieldCount = Application.WorksheetFunction.Count(ipSortSpecs)
+    If FieldCount > 3 Then ' too many fields specified
+        MsgBox "Too many sort fields are specified (3 max). Please correct and restart."
+        GoTo MyExit
+    ElseIf FieldCount = 0 Then
+        MsgBox "No sort fields defined."
+        GoTo MyExit
+    End If
+    'check that there aren't two primary fields specified, etc.
+    SortSpecSum = DuplicatesInSort(ipSortSpecs)
+    If SortSpecSum = -1 Then
+        ' a message was already delivered
+    ElseIf SortSpecSum <> 0 Then ' a return of 0 means that everything appears to be ok
+        MsgBox "There are duplicate sort fields in your sort." & vbCrLf & "Please specify only one 1 (or -1) field, one 2/-2, and one 3/-3, then restart."
+    Else 'now that all the error checking has been done, proceed with the sort!
+        If FieldCount < 3 Then MyFld3 = ipSortData.Cells(1, 1).Value  'default to first column if only 2 fields are specified
+        If FieldCount < 2 Then MyFld2 = ipSortData.Cells(1, 1).Value 'default to first column if only 1 field is specified
+        MyOrder2 = SrtAscending
+        MyOrder3 = SrtAscending
+        For i = 1 To ColumnsCntr
+            Select Case ipSortSpecs.Cells(1, i).Value
+                Case 0 'do nothing!
+                Case 1
+                     MyFld1 = ipSortData.Cells(1, i).Value
+                    MyOrder1 = SrtAscending
+                    PrimeOffset = i
+                Case -1
+                    MyFld1 = ipSortData.Cells(1, i).Value
+                    MyOrder1 = SrtDescending
+                    PrimeOffset = i
+                Case 2
+                    MyFld2 = ipSortData.Cells(1, i).Value
+                    MyOrder2 = SrtAscending
+                Case -2
+                    MyFld2 = ipSortData.Cells(1, i).Value
+                    MyOrder2 = SrtDescending
+                Case 3
+                    MyFld3 = ipSortData.Cells(1, i).Value
+                    MyOrder3 = SrtAscending
+                Case -3
+                    MyFld3 = ipSortData.Cells(1, i).Value
+                    MyOrder3 = SrtDescending
+                Case Else 'do nothing!
+            End Select
+        Next i
+        'ipSortData.Select
+        ipSortData.Sort Key1:=MyFld1, Order1:=MyOrder1, Key2:=MyFld2, _
+                Order2:=MyOrder2, Key3:=MyFld3, Order3:=MyOrder3, Header:= _
+                xlYes, OrderCustom:=1, MatchCase:=False, Orientation:=xlTopToBottom, _
+                DataOption1:=xlSortNormal, DataOption2:=xlSortNormal, DataOption3:= _
+                xlSortNormal
+        If ipExitLoc Is Nothing Then
+            ipSortData.Cells(1, PrimeOffset).Select
+'            MyFld1.Offset(4, 0).Select
+        Else 'select the appropriate cell to end on
+            ipExitLoc.Select
+        End If
+    End If
+MyExit:
+End Sub
+
+Function DuplicatesInSort(ipSortSpecs As Range) As Integer
+'written 12/22/11 by cfahey
+'This function checks that there aren't two primary, secondary, or teritary fields specified
+Dim SortSum As Integer
+Dim ColValue As Variant
+Dim i As Long
+    For i = 1 To ipSortSpecs.Columns.Count
+        ColValue = Abs(ipSortSpecs.Cells(1, i).Value)
+        If ColValue <> 0 And ColValue <> 1 And ColValue <> 2 And ColValue <> 3 Then 'invalid value!!!
+            DuplicatesInSort = -1
+            MsgBox "Invalid Sort Value at Address " & ipSortSpecs.Cells(1, i).Address
+            GoTo MyExit
+        ElseIf ColValue = 3 Then
+            SortSum = SortSum + 4
+        Else
+            SortSum = SortSum + ColValue
+        End If
+    Next i
+    If SortSum = 1 Or SortSum = 3 Or SortSum = 7 Then
+        DuplicatesInSort = 0
+    Else
+        DuplicatesInSort = SortSum
+    End If
+MyExit:
+End Function
+
+' =================================================================================================
+   I add these to the quick bar to speed formatting and moving data between Excel and Access
+   This is part of my Personal.xls macro spreadsheet
+' =================================================================================================
+Sub DollarSign()
+    Selection.NumberFormat = "$#,##0"
+End Sub
+Sub ParaDollarSign()
+    Selection.NumberFormat = "$#,##0.0_);($#,##0.0);-  "
+End Sub
+Sub DateFmt()
+    Selection.NumberFormat = "m/d/yy"
+End Sub
+Sub CommaFmt()
+    Selection.NumberFormat = "#,##0.0"
+End Sub
+Sub ParaCommaFmt()
+    Selection.NumberFormat = "#,##0.0_);(#,##0.0)"
+End Sub
+Sub Fmt_General()
+    Selection.NumberFormat = "General"
+End Sub
+Sub PcntFmt()
+    Selection.NumberFormat = "0.0%"
+End Sub
+Sub CenterHoriz()
+    Selection.HorizontalAlignment = xlCenterAcrossSelection
+End Sub
+
+Sub PortLand()
+'
+' PortLand Macro
+' Macro recorded 4/16/2008 by CFahey
+'
+If ActiveSheet.PageSetup.Orientation = xlLandscape Then
+    ActiveSheet.PageSetup.Orientation = xlPortrait
+Else
+    ActiveSheet.PageSetup.Orientation = xlLandscape
+End If
+End Sub
+
+Sub LegLet()
+' LegLet Macro - attach to QuickBar for faster formatting
+' Macro recorded 4/16/2008 by CFahey
+' Switch between paper size of legal and letter
+	If ActiveSheet.PageSetup.PaperSize = xlPaperLegal Then
+		ActiveSheet.PageSetup.PaperSize = xlPaperLetter
+	Else
+		ActiveSheet.PageSetup.PaperSize = xlPaperLegal
+	End If
+End Sub
+
+Sub SetFooter()
+'we want footer with     Filename w path      - page num -     date, time
+    With ActiveSheet.PageSetup
+        .LeftFooter = "&""Small Fonts,Regular""&5&F"
+        .CenterFooter = "&""Small Fonts,Regular""&6- &P -"
+        .RightFooter = "&""Small Fonts,Regular""&5&D  &T"
+    End With
+        'ActiveSheet.PageSetup.LeftFooter = "&""Small Fonts,Regular""&5&D  &T"
+        'ActiveSheet.PageSetup.CenterFooter = "&""Small Fonts,Regular""&6- &P -"
+End Sub
+
+
+
+Public Function Interp(DaysToMaturity As Single, cfDays As Range, cfRates As Range)
+'same function as cfinterp, but works however reference ranges are arranged
+'Basically it interpolates between two points, as for an interest rate curve
+Dim IRate As Double
+'Dim Factor1 As Double
+'Dim Factor2 As Double
+Dim MySlope As Double
+Dim MyIntercept As Double
+Dim i, j As Byte
+Dim R1RowCnt As Byte
+Dim R1ColCnt As Byte
+Dim R2RowCnt As Byte
+Dim R2ColCnt As Byte
+Dim R1Hor As Boolean
+Dim R2Hor As Boolean
+
+
+    R1RowCnt = cfDays.Rows.Count
+    R1ColCnt = cfDays.Columns.Count
+    R2RowCnt = cfRates.Rows.Count
+    R2ColCnt = cfRates.Columns.Count
+    
+    If R1RowCnt = 1 Then 'range is all in one row, so it's a horizontal range!
+        R1Hor = True
+    Else
+        R1Hor = False 'array is arranged vertically
+    End If
+    If R2RowCnt = 1 Then 'range is all in one row, so it's a horizontal range!
+        R2Hor = True
+    Else
+        R2Hor = False 'array is arranged vertically
+    End If
+    
+    If (R1RowCnt = 1 And R1ColCnt = 1) Or (R2RowCnt = 1 And R2ColCnt = 1) Then
+        Interp = -1
+        Return
+    End If
+    If DaysToMaturity = 0 Then
+        IRate = 0  ' DaysToMaturity is zero, so discount rate is zero
+    Else
+        If (DaysToMaturity <= cfDays(1, 1)) Then
+            IRate = cfRates(1, 1) ' use minimum rate
+        Else
+            If (DaysToMaturity >= cfDays(R1RowCnt, R1ColCnt)) Then 'maturity exceeds max days, so use max rate
+                IRate = cfRates(R2RowCnt, R2ColCnt)
+            Else 'read through the arrays, and interpolate values
+                i = 1 ' row counter
+                j = 1 ' column counter
+                Do
+                    If (DaysToMaturity >= cfDays(i, j)) Then
+                        If R1Hor Then ' If range is horizontal, increment column counter to go to next value
+                            j = j + 1
+                        Else
+                            i = i + 1 ' go to next row
+                        End If
+                    End If
+                Loop While (DaysToMaturity >= cfDays(i, j))
+                If R1Hor And R2Hor Then
+                    MySlope = (cfRates(i, j) - cfRates(i, j - 1)) / (cfDays(i, j) - cfDays(i, j - 1))
+                    MyIntercept = cfRates(i, j - 1) - MySlope * cfDays(i, j - 1)
+                Else
+                    If R1Hor And Not R2Hor Then
+                        MySlope = (cfRates(j, 1) - cfRates(j - 1, i)) / (cfDays(i, j) - cfDays(i, j - 1))
+                        MyIntercept = cfRates(j - 1, i) - MySlope * cfDays(i, j - 1)
+                    Else
+                        If Not R1Hor And R2Hor Then
+                            MySlope = (cfRates(j, i) - cfRates(j, i - 1)) / (cfDays(i, j) - cfDays(i - 1, j))
+                            MyIntercept = cfRates(j, i - 1) - MySlope * cfDays(i - 1, j)
+                        Else 'both ranges are vertical
+                            MySlope = (cfRates(i, j) - cfRates(i - 1, j)) / (cfDays(i, j) - cfDays(i - 1, j))
+                            MyIntercept = cfRates(i - 1, j) - MySlope * cfDays(i - 1, j)
+                        End If
+                    End If
+                End If
+                IRate = MyIntercept + MySlope * DaysToMaturity  ' y = a+ bx
+            End If
+        End If
+    End If
+    Interp = IRate
+End Function
+
+Function Cnvxty(price As Double, Par As Double, Coupon As Double, Periods As Long, YTM As Double, PeriodsPerYr As Byte) As Double
+'Convexity formula taken from June, 1996 article "Closed Form Formula for Calculating Bond Convexity" by David Blake and J. Michael Orszag
+Dim PPlus1 As Long 
+Dim PPlus2 As Long
+Dim YTMPlus1 As Double
+Dim InvYTMPlus1 As Double
+'Sample Calc: INPUT:  Bond's PV= $115.4434; Par = $100; Coupon Pmnt= $7.00, Periods = 10 (for 5 yr semi-annual); YTM = 10% p.a.; #Periods/Yr = 2 (NB: Other macro versions may require YTM per period as the parameter)
+'            RESULT:  69.7276 (half-years), or 17.43 years.
+    PPlus1 = Periods + 1 'these terms make the calculation easier to debug
+    PPlus2 = PPlus1 + 1
+    YTMPlus1 = YTM / PeriodsPerYr + 1
+    InvYTMPlus1 = 1 / YTMPlus1
+    
+    Cnvxty = (Par / price) * ((Periods * PPlus1) / (YTMPlus1 ^ PPlus2))
+    Cnvxty = Cnvxty - (Coupon / price) * ((PPlus1 * PPlus2 * InvYTMPlus1 ^ PPlus2) / (YTM / PeriodsPerYr) + 2 * ((PPlus2 * InvYTMPlus1 ^ PPlus2 - InvYTMPlus1) / (YTM / PeriodsPerYr) ^ 2) + (2 * (InvYTMPlus1 ^ PPlus2 - InvYTMPlus1)) / (YTM / PeriodsPerYr) ^ 3)
+    
+    If PeriodsPerYr <> 1 Then Cnvxty = Cnvxty / (PeriodsPerYr ^ 2)
+End Function
+
+' Some CUSIPs allow or can contain Excel wildcard characters, which can mess up counts and matches. Consequently, 
+' I substitute other characters for those wild card characters, to remove such errors.  The two functions below 
+' are related to that process / requirement.
+
+Function CUSIP(OutputType As Integer, Optional IssuerTxt As String, Optional IssueTxt As String = "-1", Optional CheckTxt As String = "-1") As Variant
+'Output Type:  1 - CUSIP as is - no substitution, with check digit
+'              2 - My CUSIP, no check digit
+'              3 - My Issuer, no check digit
+Dim i As Byte
+Dim CurrChar As String
+Dim ClearCUSIP As String
+Const ProbCharA = "#"
+Const ProbCharB = "*"
+Const ProbCharC = "@"
+Const ReplaceA = "¼"
+Const ReplaceB = "½"
+Const ReplaceC = "¾"
+    If OutputType <> 1 And OutputType <> 2 And OutputType <> 3 Then 'looking for info!
+        CUSIP = "CUSIP(#,Issuer,<Issu>,<ChkDgt>)#:1-8or9DigitCUSIP,2-MyCusip,3-MyIssuer"
+        Exit Function
+    End If
+    If Len(IssuerTxt) = 1 Then
+        CUSIP = "ERR: Too few digits in Issuer Code!"
+        Exit Function
+    End If
+    If Len(IssuerTxt) = 2 Then IssuerTxt = "0000" & IssuerTxt
+    If Len(IssuerTxt) = 3 Then IssuerTxt = "000" & IssuerTxt
+    If Len(IssuerTxt) = 4 Then IssuerTxt = "00" & IssuerTxt
+    If Len(IssuerTxt) = 5 Then IssuerTxt = "0" & IssuerTxt
+    
+    If OutputType = 3 Then ' provide MyIssuer
+        For i = 1 To 6
+            CurrChar = Mid(IssuerTxt, i, 1)
+            If CurrChar = ProbCharA Then
+                ClearCUSIP = ClearCUSIP & ReplaceA
+            ElseIf Mid(IssuerTxt, i, 1) = ProbCharB Then
+                ClearCUSIP = ClearCUSIP & ReplaceB
+            ElseIf Mid(IssuerTxt, i, 1) = ProbCharC Then
+                ClearCUSIP = ClearCUSIP & ReplaceC
+            Else
+                ClearCUSIP = ClearCUSIP & CurrChar
+            End If
+        Next i
+        CUSIP = ClearCUSIP
+        Exit Function
+    End If
+    If IssueTxt = "-1" Or IssuerTxt = "" Then 'output type better be 3,if no issue text is provided!
+            CUSIP = "ERR: No Issuer Provided!"
+            Exit Function
+    End If
+    If OutputType = 1 Then 'process just the Text
+        If Len(IssueTxt) = 1 Then IssueTxt = "0" & IssueTxt
+        If CheckTxt = "-1" Then 'checkdigit not specified
+            CUSIP = IssuerTxt & IssueTxt
+        Else
+            CUSIP = IssuerTxt & IssueTxt & CheckTxt
+        End If
+    ElseIf OutputType = 2 Then 'make mycusip - replace bad characters with neutral ones
+        If Len(IssueTxt) = 1 Then IssueTxt = "0" & IssueTxt
+        'now combine the issuer and issue text,so we only have to loop once
+        IssuerTxt = IssuerTxt & IssueTxt
+        For i = 1 To 8
+            CurrChar = Mid(IssuerTxt, i, 1)
+            If CurrChar = ProbCharA Then
+                ClearCUSIP = ClearCUSIP & ReplaceA
+            ElseIf Mid(IssuerTxt, i, 1) = ProbCharB Then
+                ClearCUSIP = ClearCUSIP & ReplaceB
+            ElseIf Mid(IssuerTxt, i, 1) = ProbCharC Then
+                ClearCUSIP = ClearCUSIP & ReplaceC
+            Else
+                ClearCUSIP = ClearCUSIP & CurrChar
+            End If
+        Next i
+        If CheckTxt = "-1" Then '-1 was the parameter default(should be from 0-9). checkdigit not specified
+            CUSIP = ClearCUSIP
+        Else
+            CUSIP = ClearCUSIP & CheckTxt
+        End If
+    Else
+        CUSIP = "ERR: First parm not recognized (1,2,or 3 only)"
+    End If
+End Function
+
+Function CCP(ipCUSIP As String) As String
+'This converts Normal CUSIP or Normal Issuer to MyCUSIP/MyISSUER, and/or vice versa
+Dim i As Byte
+Dim CUSIPLen As Byte
+Dim CurrChar As String
+Const ProbCharA = "#"
+Const ProbCharB = "*"
+Const ProbCharC = "@"
+Const ReplaceA = "¼"
+Const ReplaceB = "½"
+Const ReplaceC = "¾"
+   
+    CUSIPLen = Len(ipCUSIP)
+    For i = 1 To CUSIPLen
+        CurrChar = Mid(ipCUSIP, i, 1)
+        If CurrChar = ProbCharA Then
+            CCP = CCP & ReplaceA
+        ElseIf CurrChar = ProbCharB Then
+            CCP = CCP & ReplaceB
+        ElseIf CurrChar = ProbCharC Then
+            CCP = CCP & ReplaceC
+        ElseIf CurrChar = ReplaceA Then '**** CHANGE IT BACK TO NORMAL! *****
+            CCP = CCP & ProbCharA
+        ElseIf CurrChar = ReplaceB Then
+            CCP = CCP & ProbCharB
+        ElseIf CurrChar = ReplaceC Then
+            CCP = CCP & ProbCharC
+        Else
+            CCP = CCP & CurrChar
+        End If
+    Next i
+End Function
+
+Function ReCUSIP(ipCUSIP As String) As Variant
+'Input:     MyCUSIP or MyIssuer
+'Output:    8 character CUSIP
+'
+'Possible Refinements:
+'  - for an optional parameter, provide the error correction digit
+Const ReplaceA = "#"
+Const ReplaceB = "*"
+Const ReplaceC = "@"
+Const ProbCharA = "¼"
+Const ProbCharB = "½"
+Const ProbCharC = "¾"
+Dim MyLen As Byte
+Dim i As Byte
+    MyLen = Len(ipCUSIP)
+    If MyLen <> 6 And MyLen <> 8 And MyLen <> 9 Then 'this does not appear to be a CUSIP, or CUSIP Issuer
+        ReCUSIP = "This does not appear to be a CUSIP, or CUSIP Issuer."
+        Exit Function
+    Else
+        For i = 1 To MyLen
+            Select Case Mid(ipCUSIP, i, 1)
+                Case ProbCharA
+                    ReCUSIP = ReCUSIP & ReplaceA
+                Case ProbCharB
+                    ReCUSIP = ReCUSIP & ReplaceB
+                Case ProbCharC
+                    ReCUSIP = ReCUSIP & ReplaceC
+                Case Else
+                    ReCUSIP = ReCUSIP & Mid(ipCUSIP, i, 1)
+            End Select
+        Next i
+    End If
+End Function
+
+' =================================================================================================
+' 
+' =================================================================================================
+
+' =================================================================================================
+' 
+' =================================================================================================
+Sub ToolbarGenStash()
+On Error GoTo ErrorHandler
+'written 8/1/12 by cfahey
+'this loads a list of anything into an Access table specified by the user
+'User supplies file name and Mneumonic
+'program attempts to optimize by identifying date fields, numeric fields, and text fields, and limiting the maximum size
+
+Dim wrkJet As Workspace
+Dim rsTemp As Recordset
+Dim dbTarget As Database
+Dim tdfTargetTable As TableDef
+Dim idxRowOffset As Index
+Dim rngOrigSelection As Range
+Dim rngSourceData As Range
+Dim rngCurVals As Range
+Dim rngFirstRow As Range
+Static TargetFileName As String
+Dim TargetTableName As String
+Static MneumonicName As String
+Dim FieldName As String
+Dim FieldNames() As String
+Dim ColTypes() As String
+Dim ColSizes() As Integer
+Dim UserResponse As Variant
+Dim ErrCode As Integer
+Dim i As Long
+Dim j As Long
+Dim RowCnt As Long
+Dim ColCnt As Integer
+Dim AddOrderFld As Boolean
+Dim FirstRowHasNames As Boolean
+Const DEFAULTFILENAME = "C:\programdata\2013\zIndustryData\MiscScheds.mdb"
+Const DEFAULTTABLENAME = "MyJunk"
+'Const DEFAULTMNEUMONICNAME = "MyJunk"
+'Const DEFAULTFILENAME = "G:\Data\Capital Markets\ChrisFahey\zIndustryData\MiscScheds.mdb"
+
+'Const DEFAULTTABLENAME = "MyJunk"
+    Application.StatusBar = ""
+    'now we have a temp table name and an array of number / text, and text size, create the fields in a temporary table
+    'lastly, upload the data from the range into the Access table
+    If TypeName(ActiveSheet) <> "Worksheet" Or TypeName(Selection) <> "Range" Then 'confirm that what has been selected is a worksheet and not a chart or other object
+        MsgBox "Please select a range of CUSIPs first"
+        GoTo MyExit
+    Else
+        Set rngOrigSelection = Selection
+        Set rngSourceData = Selection
+    End If
+
+    'Determine # of rows and columns in selected range
+    RowCnt = rngSourceData.Rows.Count
+    ColCnt = rngSourceData.Columns.Count
+    'Redim arrays
+    If ColCnt > 1 Then
+        ReDim ColSizes(ColCnt - 1)
+        ReDim ColTypes(ColCnt - 1)
+        ReDim FieldNames(ColCnt - 1)
+    Else
+        ReDim ColSizes(ColCnt)
+        ReDim ColTypes(ColCnt)
+        ReDim FieldNames(ColCnt)
+    End If
+
+    Application.StatusBar = "Identifying data counts and data types"
+
+    Set rngFirstRow = Range(rngSourceData.Cells(1, 1), rngSourceData.Cells(1, ColCnt))
+
+    'Is the first row all text? If so, ask user if the first row contains field names, and if so, move (corrected) field names into appropriate array
+    ErrCode = FirstRowAllLabels(rngFirstRow)
+
+    If ErrCode = 1 Then 'There are no errors - So ask user if the first row contains field names, and if so, move (corrected) field names into appropriate array
+        UserResponse = InputBox("Does the first row contain field names you wish to use?" & vbCrLf & "(1 or yes = yes, use first row as field names" & _
+        " 0 or no = no, the first row is just data.", "TARGET FILE", 1)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            FirstRowHasNames = True
+            'change the Source Data to exclude first row
+            Set rngSourceData = Range(rngSourceData.Cells(2, 1), rngSourceData.Cells(RowCnt, ColCnt))
+            RowCnt = rngSourceData.Rows.Count
+        End If
+    End If
+
+    For j = 0 To ColCnt - 1
+        Set rngCurVals = rngSourceData.Columns(j + 1) 'Range(rngSourceData.cell(1, 1), rngSourceData.Offset(RowCnt - 1, 0))
+        rngCurVals.Select
+        Application.StatusBar = "Identifying data counts and data types for column #" & j + 1 & " of " & ColCnt
+        ErrCode = IDFieldInfoInRange(rngCurVals, ColSizes(j), ColTypes(j), RowCnt)
+    Next j
+    Application.StatusBar = "Review of data types for all columns is complete."
+
+    'Now that the data types are known, get the ACCESS file name to store the data
+    If Len(TargetFileName) > 0 Then
+        UserResponse = InputBox("Enter ACCESS File to Receive Excel Data " & vbCrLf & "(i.e. C:\programdata\2013\ZREFDATA.MDB)", "TARGET FILE", TargetFileName)
+    Else
+        UserResponse = InputBox("Enter ACCESS File to Receive Excel Data " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", DEFAULTFILENAME)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    TargetFileName = UCase(TrimMyString(UserResponse))
+    'next, ask for a table Mneumonic
+    If Len(MneumonicName) > 0 Then
+        UserResponse = InputBox("What suitably describes this data to be stored?", "TARGET FILE", MneumonicName)
+    Else
+        UserResponse = InputBox("What suitably describes this data to be stored?", "TARGET FILE", DEFAULTTABLENAME)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    MneumonicName = UCase(TrimMyString(UserResponse))
+    MneumonicName = RemoveAllSpaces(MneumonicName)
+    'Determine the temp table name
+    TargetTableName = MakeTmpName(MneumonicName)
+    'Does the file exist?  If it doesn't exist, ask user if they want to create it. If they don't, abort process, else create the file.
+    If Len(Dir$(TargetFileName)) = 0 Then ' the file doesn't exist, so ask if you want to create it
+        UserResponse = InputBox("The file " & TargetFileName & " does not currently exist." & vbCrLf & "Do you want to create a new file? " & vbCrLf & "0 or no => NO, I don't want a new file created." & vbCrLf & "1 or YES = I want to create a new ACCESS file.")
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 0 Or UserResponse = "0" Or UCase(UserResponse) = "NO" Or UCase(UserResponse) = "FALSE" Or UserResponse = False Then 'abort processing
+            MsgBox "Transfer Aborted.  Restart to complete. "
+            GoTo MyExit
+        Else ' create the new file!
+            SysCmd acSysCmdSetStatus, "ToolbarGenStash: Creating Access database file " & TargetFileName & ". "
+            Set wrkJet = DBEngine.Workspaces(0)
+            Set dbTarget = wrkJet.CreateDatabase(TargetFileName, dbLangGeneral, dbVersion40) 'create a new Access File, using the targettablename
+        End If
+    Else 'the file exists, so open it
+        Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+        Set dbTarget = wrkJet.OpenDatabase(TargetFileName)
+        j = DropExistingTable(dbTarget, TargetTableName)
+        If j = -1 Then
+            MsgBox "Table unable to be deleted. Aborting process!"
+            GoTo MyExit
+        End If
+    End If
+
+    'next, ask whether order of date records is important
+    UserResponse = InputBox("Lastly, is the original order of your records important? " & vbCrLf & vbCrLf & "If it is, an order field will be added." & vbCrLf & vbCrLf & "0 or no => NO, then the order is NOT important." & vbCrLf & "1 or YES => then the order of the records IS important.", "ADD AN ORDER FIELD?", 1)
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    UserResponse = UCase(TrimMyString(UserResponse))
+    If UserResponse = "1" Or UserResponse = 1 Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then AddOrderFld = True
+
+    Application.StatusBar = "Making Temporary Table. . ."
+    'now create the table
+    Set tdfTargetTable = dbTarget.CreateTableDef(TargetTableName)
+    'create the table, with fields
+    If FirstRowHasNames Then 'fix the column names
+        For j = 0 To ColCnt - 1
+            FieldNames(j) = rngFirstRow.Cells(1, j + 1)
+        Next j
+        FixColNames FieldNames, ColCnt
+    End If
+    For j = 0 To ColCnt - 1
+        If FirstRowHasNames Then
+            FieldName = FieldNames(j)
+        Else
+            FieldName = "FIELD" & CStr(j + 1)
+        End If
+        If ColTypes(j) = "TEXT" Then 'ColSizes(j), ColTypes(j)
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbText, ColSizes(j))
+        ElseIf ColTypes(j) = "INTEGER" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbInteger) 'Integer
+        ElseIf ColTypes(j) = "LONG" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbLong) 'long
+        ElseIf ColTypes(j) = "FLOAT" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDouble) 'Float
+        ElseIf ColTypes(j) = "BYTE" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbByte) 'byte
+        ElseIf ColTypes(j) = "DECIMAL" Then
+            'tdfTargetTable.CreateField(FieldName, dbDecimal) 'Decimal
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDouble)  ' dbCurrency) 'Decimal
+            'Call SetPropertyDAO(dbTarget.TableDefs(TargetTableName).Fields(FieldName), "DecimalPlaces", dbDecimal, CByte(2))
+        Else ' the default for a number
+            MsgBox "Unrecognized Data Type for Fieldname " & FieldNames(j) & ". Exiting.  Fix program and restart."
+            GoTo MyExit
+            'tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDecimal)
+        End If
+    Next j
+
+    If AddOrderFld Then
+        tdfTargetTable.Fields.Append tdfTargetTable.CreateField("ORDER", dbLong)
+        'add an index, so cusips are arranged properly all the time
+        Set idxRowOffset = tdfTargetTable.CreateIndex("RowNum")
+        idxRowOffset.Fields.Append idxRowOffset.CreateField("Order", dbLong)
+
+        tdfTargetTable.Indexes.Append idxRowOffset
+        tdfTargetTable.Indexes.Refresh
+    End If
+
+    dbTarget.TableDefs.Append tdfTargetTable
+    dbTarget.TableDefs.Refresh
+
+    Application.StatusBar = "Temporary Table Made. Loading spreadsheet data . . ."
+
+    Set rsTemp = dbTarget.OpenRecordset(TargetTableName, dbOpenTable)
+    'load cusips into the temporary table, checking to be sure that they are 9 characters long
+    'RecCount = rngSourceData.Rows.Count
+    Set rngCurVals = rngSourceData.Cells(1, 1) 'Columns(j + 1) 'Range(rngSourceData.cell(1, 1), rngSourceData.Offset(RowCnt - 1, 0))
+
+    rngCurVals.Select
+
+    For i = 1 To RowCnt
+        rsTemp.AddNew
+        For j = 1 To ColCnt
+            If FirstRowHasNames Then
+                FieldName = FieldNames(j - 1)
+            Else
+                FieldName = "FIELD" & CStr(j)
+            End If
+
+            'TargetFileName = CStr(rngSourceData.Cells(i, J).Value)
+            rsTemp.Fields(FieldName).Value = rngSourceData.Cells(i, j).Value
+        Next j
+        If AddOrderFld Then rsTemp.Fields("Order").Value = i
+        rsTemp.Update
+    Next i
+    Application.StatusBar = "Transfer Complete. " & ColCnt & " column(s) of " & RowCnt & " row(s) of data was uploaded into table " & TargetTableName & " in file " & TargetFileName
+
+    rsTemp.Close
+    dbTarget.Close
+    wrkJet.Close
+    rngOrigSelection.Select
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description & vbCrLf & "Column: " & j & ", Row: " & i & "."
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description & "i:" & i & ", j:" & j & "."
+    Err.Clear
+MyExit:
+    Set rsTemp = Nothing
+    Set tdfTargetTable = Nothing
+    Set idxRowOffset = Nothing
+    Set dbTarget = Nothing
+    Set wrkJet = Nothing
+    Set rngSourceData = Nothing
+    Set rngOrigSelection = Nothing
+    Set rngCurVals = Nothing
+    Set rngFirstRow = Nothing
+End Sub
+
+Sub ToolbarGenFetch()
+On Error GoTo ErrorHandler
+'written 2/8/12 by cfahey
+'this brings down relevant info from a specified table into Excel
+Dim wrkJet As DAO.Workspace
+Dim dbSource As DAO.Database
+Dim rsTemp As DAO.Recordset
+Dim N As Object
+Dim strFields As String
+Dim CurrentAddr As Range
+Dim obTimer As New CHighResTimer
+Dim MyTime As Double
+Dim j As Byte
+Dim CurAddr  As String
+Static SourceFileName As String
+Static SourceTableName As String
+Dim strSQL As String
+Dim UserResponse As Variant
+Dim i As Long
+Dim SourceTableExists As Boolean
+Dim DropAfterUse As Boolean
+Dim ProvideHeadings As Boolean
+Dim MyDataSource As Byte 'if 1, a table, if 2, a query
+
+Const DEFAULTFILENAME = "C:\CMData\2013\zIndustryData\SecurityScheds.mdb"
+'Const DEFAULTFILENAME = "C:\ProgramData\zBBergData1.mdb"
+'Static DEFAULTTABLENAME As String
+Const DEFAULTTABLENAME = "DebtData"
+Const ALLOWDROPAFTERUSE = 0
+
+    obTimer.StartTimer
+    Application.StatusBar = " "
+    Application.Calculation = xlCalculationManual
+'    If Len(DEFAULTTABLENAME) = 0 Then DEFAULTTABLENAME = MakeTmpName("Table")
+    
+    'only one cell specified?
+    UserResponse = InputBox("NOTE THAT ANY PRIOR DATA WILL NOT BE DELETED!" & vbCrLf & vbCrLf & _
+        "Is the cursor positioned on the North West corner of the range to receive the data? " & vbCrLf & vbCrLf & _
+        "1, YES, or TRUE = Yes, it is in the spot to receive data" & vbCrLf & _
+        "0, NO, or FALSE = I want to cancel, reposition the cursor, and restart.", "TARGET CELL SPECIFICATION", 1)
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    If UserResponse = 0 _
+      Or UserResponse = "0" _
+      Or UCase(UserResponse) = "NO" _
+      Or UCase(UserResponse) = "FALSE" _
+      Or UserResponse = False _
+      Or Selection.Rows.Count > 1 _
+      Or Selection.Columns.Count > 1 Then 'there should only be 1 cell specified!
+        MsgBox "Please restart." & vbCrLf & " Note that you need to specify only 1 cell, to be located in the " & vbCrLf & _
+        "upper left hand corner, for the data retrieval function. "
+        GoTo MyExit
+    Else
+'''        TargetAddr = ""
+        Set CurrentAddr = Selection.Cells(1, 1)
+        CurAddr = CurrentAddr.Address
+    End If
+'''    If UserResponse = 0 Or UserResponse = "0" Or UCase(UserResponse) = "NO" Or UCase(UserResponse) = "FALSE" Then
+'''        TargetAddr = ""
+'''        ProvideHeadings = True
+'''    Else
+'''        TargetAddr = ""
+'''    End If
+    If ALLOWDROPAFTERUSE Then
+        UserResponse = InputBox("Do you want to delete the table after you have imported the data into Excel? " & vbCrLf & "1, YES, or TRUE = Yes, please provide headings" & vbCrLf & "0, NO, or FALSE = I already have headings, I just want the data.", "NEED HEADINGS", 0)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            DropAfterUse = True
+        End If
+    End If
+    If Len(SourceFileName) = 0 Then  'Now where is the table located?
+        UserResponse = InputBox("Enter the ACCESS Source FILE name: " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", DEFAULTFILENAME)
+    Else
+        UserResponse = InputBox("Enter the ACCESS Source FILE name: " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", SourceFileName)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    SourceFileName = UCase(TrimMyString(UserResponse))
+    
+    'Does the file exist?  If it doesn't exist, ask user if they want to create it. If they don't, abort process, else create the file.
+    If Len(Dir$(SourceFileName)) = 0 Then
+        MsgBox "That ACCESS file doesn't exist. Please check the directory and the source ACCESS file name before restarting. " ' the file doesn't exist
+        GoTo MyExit
+    End If
+    
+    'open the source file
+    Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+    Set dbSource = wrkJet.OpenDatabase(SourceFileName, dbReadOnly)
+    
+    'Application.Calculation = xlCalculationManual
+    
+    If Len(SourceTableName) = 0 Then
+        UserResponse = InputBox("Enter the ACCESS TABLE to fetch: " & vbCrLf & "(i.e. MYJunk)", "TARGET FILE", DEFAULTTABLENAME)
+    Else
+        UserResponse = InputBox("Enter the ACCESS TABLE to fetch: " & vbCrLf & "(i.e. MYJunk)", "TARGET FILE", SourceTableName)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    
+    SourceTableName = UCase(TrimMyString(UserResponse))
+        
+    'the file exists, does the table exist in the file?
+    SourceTableExists = False
+    
+    For Each N In dbSource.TableDefs
+        If UCase(N.Name) = SourceTableName Then
+            MyDataSource = 1
+            SourceTableExists = True
+            Exit For
+        End If
+    Next N
+
+    If MyDataSource = 0 Then 'check to see if the specified table was really a query
+        For Each N In dbSource.QueryDefs
+            If UCase(N.Name) = SourceTableName Then
+                SourceTableExists = True
+                SourceTableName = N.Name 'in case there is a problem with case sensitivity later
+                MyDataSource = 2
+                Exit For
+            End If
+        Next N
+    End If
+    
+    If SourceTableExists Then
+        If MyDataSource = 1 Then
+            strFields = MakeFieldString(dbSource, SourceTableName, True)
+        ElseIf MyDataSource = 2 Then 'retrieve data fields from query
+            strFields = MakeQueryFieldString(dbSource, SourceTableName, False)
+        Else
+            MsgBox "Specified data sourcce " & SourceTableName & " not found in file " & SourceFileName & " as either a Table or Query. Please confirm table/query exists, then restart."
+            GoTo MyExit
+        End If
+    End If
+    strSQL = " SELECT " & strFields & " FROM " & SourceTableName & " ; "
+    
+    'now open the recordset
+    Set rsTemp = dbSource.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    rsTemp.MoveLast
+    If rsTemp.RecordCount > 1048550 Then 'there are too many records in the table!
+        MsgBox "there are well over 1 million records to be downloaded.  It is too large to dump into an Excel spreadsheet. " & vbCrLf & vbCrLf & "You must find another way!"
+        GoTo MyExit
+    End If
+    rsTemp.MoveFirst ' I don't know if this step is necessary!
+    
+    'does the user want column headings?
+    UserResponse = InputBox("Do you want column headings as a first row? " & vbCrLf & "1, YES, or TRUE = Yes, please provide headings" & vbCrLf & "0, NO, or FALSE = I already have headings, I just want the data.", "NEED HEADINGS", 0)
+    If Len(UserResponse) = 0 Then
+        GoTo MyExit
+    Else
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Then
+            CopyRSHeaders rsTemp, ActiveSheet, CurrentAddr.Cells(1, 1).Address
+            'now copy the recordset
+            CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+        Else 'just copy the recordset
+            CurrentAddr.Cells(1, 1).CopyFromRecordset rsTemp  'Return the values
+        End If
+    End If
+
+    If DropAfterUse Then
+        UserResponse = InputBox("Please confirm that you want to delete the table " & SourceTableName & " in file " & vbCrLf & SourceFileName & vbCrLf & "1, YES, or TRUE = Yes, please delete the table" & vbCrLf & "0, NO, or FALSE = Please keep the table.", "CONFIRMATION OF TABLE DELETION", 0)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            strSQL = " DROP TABLE " & SourceTableName
+            dbSource.Execute strSQL
+        End If
+    End If
+    rsTemp.Close
+    dbSource.Close
+    wrkJet.Close
+    
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    Application.StatusBar = "Data Retrieval Complete.  Run Time: " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Application.Calculation = xlCalculationAutomatic
+    Set N = Nothing
+    Set CurrentAddr = Nothing
+    Set rsTemp = Nothing
+    Set dbSource = Nothing
+    Set wrkJet = Nothing
+    Set obTimer = Nothing
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+
+Sub IDUniqueVals()
+On Error GoTo ErrorHandler
+'this dumps unique values in a selected range (single column) to a target cell (I think)
+Dim UserResponse As Variant
+Dim SrcRng As Range
+Dim TgtRng As Range
+Static DefTarget As String  'to save the target cell value
+
+    'test that a range is selected or row > 1
+    Set SrcRng = Selection
+
+    If SrcRng.Columns.Count > 1 Or SrcRng.Rows.Count < 2 Then
+        Application.StatusBar = "Please choose a valid range, of only 1 column and more than 1 row"
+        GoTo MyExit
+    End If
+
+    If Len(DefTarget) = 0 Then 'DefTarget hasn't been used before, so pick any cell as a default
+        UserResponse = InputBox("Target Cell: ", "TARGET FILE", "D5")
+    Else
+        UserResponse = InputBox("Target Cell: ", "TARGET FILE", DefTarget)
+    End If
+
+    If UserResponse = 0 Or UserResponse = "" Or Len(UserResponse) = 0 Then
+        GoTo MyExit
+    Else
+        DefTarget = UCase(CStr(UserResponse))
+
+        'change the Source Data to exclude first row
+        SrcRng.AdvancedFilter Action:=xlFilterCopy, CopyToRange:=Range(DefTarget), Unique:=True 'run the filter
+        DefTarget = Range(DefTarget).Offset(0, 1).Address(0, 0) 'Now, before leaving, move default cell one column to the right
+
+    End If
+
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error#: " & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error#: " & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+    Set SrcRng = Nothing
+    Set TgtRng = Nothing
+End Sub
+
+Sub CopyRSHeaders(ByRef ipRS As DAO.Recordset, ByRef ipWkSht As Excel.Worksheet, ipNWCornerLoc As String)
+'added 8/9/12 by CFahey
+'this dumps column names into the Excel spreadsheet.  Adapted from an Access VBA module
+Dim MyDumpRng As Excel.Range
+Dim i As Integer
+Dim fldName As Object
+    i = 0
+    Set MyDumpRng = ipWkSht.Range(ipNWCornerLoc)
+    For Each fldName In ipRS.Fields
+        MyDumpRng.Offset(0, i).Value = fldName.Name
+        i = i + 1
+    Next fldName
+MyExit:
+    Set MyDumpRng = Nothing
+    Set fldName = Nothing
+End Sub
+
+Function MakeFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT ipStatement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim tdfCurr As DAO.TableDef
+Dim fldCurr As DAO.Field
+
+    Set tdfCurr = ipDB(ipTableName)
+    FirstField = True
+    For Each fldCurr In tdfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeFieldString = fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & fldCurr.Name
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeFieldString = ipTableName & "." & fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & ipTableName & "." & fldCurr.Name
+                End Select
+            End If
+        End If
+    Next fldCurr
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+MyExit:
+    Set fldCurr = Nothing
+    Set tdfCurr = Nothing
+End Function
+
+Function MakeQueryFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT ipStatement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim QryDfCurr As DAO.QueryDef
+Dim fldCurr As DAO.Field
+
+    Set QryDfCurr = ipDB.QueryDefs(ipTableName)
+    FirstField = True
+    
+    For Each fldCurr In QryDfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeQueryFieldString = fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeQueryFieldString = MakeQueryFieldString & ", " & fldCurr.Name
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeQueryFieldString = ipTableName & "." & fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeQueryFieldString = MakeQueryFieldString & ", " & ipTableName & "." & fldCurr.Name
+                End Select
+            End If
+        End If
+
+    Next fldCurr
+    GoTo MyExit
+    
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+MyExit:
+    Set fldCurr = Nothing
+    Set QryDfCurr = Nothing
+End Function
+
+Function DropExistingTable(ByRef ipDB As DAO.Database, ipTableName As String) As Integer
+'written 11/2/11 by cfahey
+'this returns a 1 (true) if a table exists in a given Access file, 0 (false) otherwise
+
+Dim MyTd As DAO.TableDefs
+Dim N As Object
+    On Error GoTo ErrorHandler
+
+    DropExistingTable = 1
+    For Each N In ipDB.TableDefs
+        If N.Name = ipTableName Then
+            DropExistingTable = 0
+            ipDB.Execute "Drop table " & ipTableName
+            GoTo MyExit
+        End If
+    Next N
+    GoTo MyExit
+ErrorHandler:
+    DropExistingTable = -1
+MyExit:
+    Set MyTd = Nothing
+    Set N = Nothing
+End Function
+
+Function TrimSpaces(ipTxt As String) As String
+Dim CharCnt As Long
+Dim WorkingTxt As String
+Dim i As Long
+    CharCnt = Len(ipTxt)
+    If CharCnt = 0 Or (CharCnt = 1 And ipTxt <> " ") Then
+        TrimSpaces = ipTxt
+    Else
+'    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            If Mid(ipTxt, i, 1) <> " " Then
+                Exit For ' non-space character found
+            End If
+        Next i
+        ipTxt = Mid(ipTxt, i, CharCnt - (i - 1))
+        CharCnt = Len(ipTxt)
+        For i = CharCnt To 1 Step -1
+            If Mid(ipTxt, i, 1) <> " " Then
+                Exit For
+            End If
+        Next i
+        TrimSpaces = Mid(ipTxt, 1, i)
+    End If
+End Function
+
+'==================================================================================================================
+'            These are miscellaneous functions, such as benford law calculations
+'==================================================================================================================
+
+Sub BubbleSort(ByRef ipVals() As Byte, ipCnt As Byte, Optional SortAtoZ As Boolean = True)
+'modded 2.6.13 by cfahey
+'this sorts the array values by default lowest to highest
+Dim Changed As Boolean
+Dim TmpVal As Byte
+Dim i As Byte
+    Do
+        Changed = False
+        If SortAtoZ = True Then
+            For i = 0 To ipCnt - 2
+                If ipVals(i) > ipVals(i + 1) Then 'if a greater value is later in the array, swap the array elements
+                  'i.e. if T > A
+                    TmpVal = ipVals(i)
+                    ipVals(i) = ipVals(i + 1)
+                    ipVals(i + 1) = TmpVal
+                    Changed = True
+                End If
+            Next i
+        Else 'sort the values highest to lowest
+            For i = 0 To ipCnt - 2
+                If ipVals(i) < ipVals(i + 1) Then
+                    TmpVal = ipVals(i)
+                    ipVals(i) = ipVals(i + 1)
+                    ipVals(i + 1) = TmpVal
+                    Changed = True
+                End If
+            Next i
+        End If
+    Loop Until Changed = False
+End Sub
+
+Function BenfordLaw(MyRange As Range, ipMyDigit As String) As Long
+'This function counts the number of occurances of a specified digit in a range of numbers
+Dim RowCount As Long
+Dim i As Long
+Dim j As Long
+Dim k As Long
+Dim TestNum As String
+Dim ColCount As Long
+Dim TotCells As Long
+    RowCount = MyRange.Rows.Count
+    ColCount = MyRange.Columns.Count
+    TotCells = RowCount * ColCount
+    'MsgBox TotCells
+    For i = 1 To ColCount
+        For j = 1 To RowCount
+            TestNum = FirstNumber(MyRange.Cells(j, i))
+            If Len(TestNum) = 0 Then
+             'there were no numbers found! Do nothing. . .
+            ElseIf Len(TestNum) = 1 Then
+                If TestNum = ipMyDigit Then BenfordLaw = BenfordLaw + 1
+            Else ' more than 1 number was returned
+                For k = 1 To Len(TestNum)
+                    If Mid(TestNum, k) = ipMyDigit Then BenfordLaw = BenfordLaw + 1
+                Next k
+            End If
+        Next j
+    Next i
+    Set MyRange = Nothing ' dont know if you need to do this, but doing it anyway
+End Function
+
+Function FirstNumber(cellvalue As String) As String
+Dim CurStr As String
+Dim i As Byte 'number of first numbers
+Dim j As Integer 'length of cell string
+Dim MyOffset As Integer
+Dim MyEndOffset As Integer
+    MyOffset = FindNumber(cellvalue)
+    If MyOffset = 0 Then 'no numbers found! do nothing
+        Exit Function
+    Else 'process the remaining numbers in the string
+        FirstNumber = Mid(cellvalue, MyOffset, 1) 'save the first number found!
+        MyEndOffset = FindNumberEnd(Mid(cellvalue, MyOffset, Len(cellvalue) - MyOffset))
+        CurStr = Mid(cellvalue, MyOffset + MyEndOffset, Len(cellvalue) - MyOffset - MyEndOffset) 'trim off number already found
+        MyOffset = FindNumber(CurStr)
+        Do While MyOffset > 0 And MyEndOffset <> 0
+            MyEndOffset = FindNumberEnd(Mid(CurStr, MyOffset))
+            FirstNumber = FirstNumber & "," & Mid(CurStr, MyOffset, 1) ' save the first character in the number
+            CurStr = Mid(CurStr, MyOffset + MyEndOffset)
+            MyOffset = FindNumber(CurStr)
+        Loop 'While FindNumber(CurStr) > 0
+    End If
+End Function
+
+Function FindNumber(MyStr As String) As Byte
+Dim i As Integer
+Dim MyChar As String
+Dim FoundNum As Boolean
+    FoundNum = False
+    For i = 1 To Len(MyStr)
+        MyChar = Mid(MyStr, i, 1)
+        If MyChar = "1" Or MyChar = "2" Or MyChar = "3" Or MyChar = "4" Or MyChar = "5" Or MyChar = "6" Or MyChar = "7" Or MyChar = "8" Or MyChar = "9" Then
+            FoundNum = True
+            Exit For
+        End If
+    Next i
+    If FoundNum = True Then FindNumber = i
+End Function
+
+Function FindNumberEnd(MyStr As String) As Byte
+Dim i As Integer
+Dim MyChar As String
+Dim FoundEnd As Boolean
+    FoundEnd = False
+    For i = 1 To Len(MyStr)
+        MyChar = Mid(MyStr, i, 1)
+        If MyChar <> "$" And MyChar <> " " And MyChar <> ")" And MyChar <> "." And MyChar <> "," And MyChar <> "," And MyChar <> "0" And MyChar <> "1" And MyChar <> "2" And MyChar <> "3" And MyChar <> "4" And MyChar <> "5" And MyChar <> "6" And MyChar <> "7" And MyChar <> "8" And MyChar <> "9" Then
+            FoundEnd = True
+            Exit For
+        End If
+    Next i
+    If FoundEnd Then FindNumberEnd = i
+End Function
+
+Function LastRowInCol(Optional ipColName As Variant) As Long
+'return the last used row in a Column: Current column is the default
+On Error GoTo ErrorHandler
+Dim i As Integer
+    Application.Volatile
+    If IsMissing(ipColName) Then
+            ipColName = ActiveSheet.Cells(xlCellTypeLastCell).Address
+            i = InStr(2, ipColName, "$")
+            ipColName = Mid(ipColName, 2, i - 2)
+    Else
+        If Len(ipColName) = 0 Or ipColName = "" Or ipColName = 0 Then
+            ipColName = ActiveSheet.Cells(xlCellTypeLastCell).Address
+            i = InStr(2, ipColName, "$")
+            ipColName = Mid(ipColName, 2, i - 2)
+        End If
+    End If
+    With ActiveSheet
+        LastRowInCol = .Cells(.Rows.Count, ipColName).End(xlUp).Row
+    End With
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "ERROR! #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+End Function
+
+Function LastColInRow(Optional ipRowNum As Variant) As Long
+'Find the last used column in a Row: row 1 in this example
+On Error GoTo ErrorHandler
+Dim CurAddr As String
+Dim i As Integer
+    Application.Volatile
+    If IsMissing(ipRowNum) Then
+        CurAddr = Application.Caller.Worksheet.Cells(Application.Caller.Row, Application.Caller.Column).Address
+        i = InStr(2, CurAddr, "$")
+        ipRowNum = Mid(CurAddr, i + 1, Len(CurAddr) - i)
+    Else
+        If Len(ipRowNum) = 0 Or ipRowNum = "" Or ipRowNum = 0 Then
+            CurAddr = Application.Caller.Worksheet.Cells(Application.Caller.Row, Application.Caller.Column).Address
+            i = InStr(2, CurAddr, "$")
+            ipRowNum = Mid(CurAddr, i + 1, Len(CurAddr) - i)
+        End If
+    End If
+        'CurAddr = ActiveSheet.Cells(xlCellTypeLastCell).Address
+'    i = InStr(2, CurAddr, "$")
+'    ipRowNum = Mid(CurAddr, i + 1, Len(CurAddr) - i)
+
+    With ActiveSheet
+        LastColInRow = CLng(.Cells(CLng(ipRowNum), .Columns.Count).End(xlToLeft).Column)
+    End With
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "ERROR! #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+End Function
+
+Function IDAddr(ByRef ipAddr As String, Optional ipPtr As Byte = 0) As String
+On Error GoTo ErrHandler:
+'this receives an address, such as B10 or C15:AB25
+'if there's only 1 cell, it returns the value of the cell
+'if there's more than 1 cell, it returns the relevant corner of the passed address
+'  0 or 1 (C25)--------------- 2 (FF25)
+'      |                  |
+'      |                  |
+'      3 (C50)---------------- 4 (FF50)
+'addresses can be $B10, $b$10, b$10, b10:c25, or any permutation thereof
+'one function will be to remove the $ characters
+Dim CleanAddr As String
+Dim CurChar As String
+Dim TopRow As String
+Dim BottomRow As String
+Dim LeftCol As String
+Dim RightCol As String
+Dim CleanCol As String
+Dim CleanRow As String
+Dim Ptr As Integer
+Dim i As Integer
+
+    ipAddr = UCase(ipAddr)
+    Ptr = InStr(1, ipAddr, ":")
+    If Ptr = 0 And ipPtr >= 2 Then 'there's a single address, inconsistent with the function request
+        IDAddr = "-1"
+        GoTo MyExit
+    ElseIf Ptr = 0 Then 'process the single address, and ship out
+            For i = 1 To Len(ipAddr)
+                CurChar = Mid(ipAddr, i, 1)
+                If CurChar <> "$" Then CleanAddr = CleanAddr & CurChar
+            Next i
+            IDAddr = CleanAddr
+            GoTo MyExit
+    Else 'there are two addresses, so we need to construct the 4 corners
+        'get the full address with $ signs
+        'Range(ipAddr).Select
+        'ipAddr = Selection.Address
+        Ptr = InStr(1, ipAddr, ":")
+        For i = 1 To Ptr  'first character will be a $
+            CurChar = Mid(ipAddr, i, 1)
+            If CurChar <> "$" And CurChar <> ":" Then 'this is a relevant character
+                If Asc(CurChar) > 47 And Asc(CurChar) < 58 Then 'its a number
+                    CleanRow = CleanRow + CurChar
+                Else ' its a letter
+                    If Asc(CurChar) > 64 And Asc(CurChar) < 91 Then 'it's a proper column identifier
+                        CleanCol = CleanCol + CurChar
+                    Else
+                        MsgBox "INVALID CHARACTER IN ADDRESS! ABORTING!"
+                        GoTo MyExit
+                    End If
+                End If
+            End If
+        Next i
+        LeftCol = CleanCol
+        TopRow = CleanRow
+        CleanRow = ""
+        CleanCol = ""
+        For i = Ptr + 1 To Len(ipAddr)
+            CurChar = Mid(ipAddr, i, 1)
+            If CurChar <> "$" And CurChar <> ":" Then 'this is a relevant character
+                If Asc(CurChar) > 47 And Asc(CurChar) < 58 Then 'its a number
+                    CleanRow = CleanRow + CurChar
+                Else ' its a letter
+                    If Asc(CurChar) > 64 And Asc(CurChar) < 91 Then 'it's a proper column identifier
+                        CleanCol = CleanCol + CurChar
+                    Else
+                        MsgBox "INVALID CHARACTER IN ADDRESS! ABORTING!"
+                        GoTo MyExit
+                    End If
+                End If
+            End If
+        Next i
+        RightCol = CleanCol
+        BottomRow = CleanRow
+    End If
+    Select Case ipPtr
+        Case 0, 1:
+            IDAddr = LeftCol + TopRow
+        Case 2:
+            IDAddr = RightCol + TopRow
+        Case 3:
+            IDAddr = LeftCol + BottomRow
+        Case Else:
+            IDAddr = RightCol + BottomRow
+    End Select
+    GoTo MyExit
+
+ErrHandler:
+    MsgBox "Err# " & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Err# " & Err.Number & ", " & Err.Description
+    Err.Clear
+yExit:
+End Function
+
+Function RJ(ipRng As Range, Optional ipEnd As String = " ", Optional ipCutBlanks As Boolean = True) As String
+'Row Join
+'Merge contents of either columns or rows into one cell of text,
+'with each line terminated by the end string or a space or a special (ipEnd) character.
+'ipCutBlanks determines whether blank lines should be included, or removed 
+On Error GoTo ErrorHandler
+Dim ByRow As Boolean
+Dim MyCnt As Long
+Dim i As Long
+Dim ReturnStr As String
+Dim CurVal As String
+Dim PrevVal As String
+'Const CRLF = 13
+    If ipEnd = "LF" Or ipEnd = "CRLF" Or ipEnd = "CR" Then ipEnd = vbCrLf
+    
+    If ipRng.Columns.Count = 1 And ipRng.Rows.Count = 1 Then 'only 1 cell specified. Return teh contents!
+        RJ = ipRng.Cells(1, 1).Value
+        GoTo MyExit
+    ElseIf ipRng.Columns.Count = 1 And ipRng.Rows.Count > 1 Then
+        ByRow = True
+        MyCnt = ipRng.Rows.Count
+    ElseIf ipRng.Columns.Count > 1 And ipRng.Rows.Count = 1 Then
+        ByRow = False
+        MyCnt = ipRng.Columns.Count
+    End If
+    
+    PrevVal = ""
+    'now, iterate through the range specified
+    For i = 1 To MyCnt
+        If ByRow Then 'first, get next value
+            CurVal = CStr(ipRng.Cells(i, 1).Value)
+        Else
+            CurVal = CStr(ipRng.Cells(1, i).Value)
+        End If
+        'If i <> 1 And i < MyCnt And
+        If i <> 1 And _
+            ((Len(CurVal) <> 0 And Len(PrevVal) <> 0) Or ipCutBlanks = False) _
+        Then ReturnStr = ReturnStr & ipEnd 'don't add a separator for the last value - shouldn't be needed
+        
+        'if value isn't blank, add to return string, else ignore
+        If ipCutBlanks Then
+            If Len(CurVal) <> 0 Then ReturnStr = ReturnStr & CurVal
+        Else
+            ReturnStr = ReturnStr & CurVal
+        End If
+        PrevVal = CurVal
+        
+    Next i
+    RJ = ReturnStr
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+End Function
+
+Function CellID(ByRef ipAddr As String, Optional ipPtr As Byte = 0) As String
+On Error GoTo ErrHandler:
+'this receives an address, such as B10 or C15:AB25
+'It will return either the column or row, of either the first or
+' the second cell address.
+'  0 or 1 => first (or only) column
+'    2    => first (or only) row
+'    3    => second column
+'    4    => second row
+'
+'addresses can be $B10, $b$10, b$10, b10:c25, or any permutation thereof
+'one function will be to remove the $ characters
+Dim CleanAddr As String
+Dim CurChar As String
+Dim TopRow As String
+Dim BottomRow As String
+Dim LeftCol As String
+Dim RightCol As String
+Dim CleanCol As String
+Dim CleanRow As String
+Dim Ptr As Integer
+Dim i As Integer
+Dim FirstDone As Boolean
+    
+    ipAddr = UCase(ipAddr)
+    Ptr = InStr(1, ipAddr, ":")
+    If Ptr = 0 And ipPtr > 2 Then 'there's a single address, inconsistent with the function request
+        CellID = "-1"
+        GoTo MyExit
+    Else
+        FirstDone = False
+        For i = 1 To Len(ipAddr)
+            CurChar = Mid(ipAddr, i, 1)
+            If CurChar <> "$" Then
+                If CurChar = ":" Then
+                    If ipPtr = 0 Or ipPtr = 1 Then
+                        CellID = CleanCol
+                        GoTo MyExit
+                    Else
+                        If ipPtr = 2 Then
+                            CellID = CleanRow
+                            GoTo MyExit
+                        Else
+                            CleanCol = ""
+                            CleanRow = ""
+                        End If
+                    End If
+                Else
+                    If Asc(CurChar) > 47 And Asc(CurChar) < 58 Then 'its a number
+                        CleanRow = CleanRow + CurChar
+                    Else
+                        If Asc(CurChar) > 64 And Asc(CurChar) < 91 Then 'it's a proper column identifier
+                            CleanCol = CleanCol + CurChar
+                        Else
+                            CellID = "-1"
+                            GoTo MyExit
+                        End If
+                    End If
+                End If
+            End If
+        Next i
+        If ipPtr = 0 Or ipPtr = 1 Or ipPtr = 3 Then
+            CellID = CleanCol
+        End If
+        If ipPtr = 2 Or ipPtr = 4 Then
+            CellID = CleanRow
+        End If
+    End If
+    GoTo MyExit
+
+ErrHandler:
+    MsgBox "Err# " & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Err# " & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+End Function
+
+'==================================================================================================================
+' This functionality generalizes the Bloomberg Stash and Fetch functions (below) to move data into a new Access table 
+' directly from an Excel spreadsheet (ToolbarGenStash) and to download into an Excel spreadsheet directly from an Access 
+' table or even a query (ToolbarGenFetch). There are additional functions, to ensure unique and valid Access field 
+' names, or to create valid ones, as well as to detect eqivalent Access field types from the data in the Excel columns.  
+'==================================================================================================================
+Sub ToolbarGenStash()
+On Error GoTo ErrorHandler
+'written 8/1/12 by cfahey
+'this loads a list of anything into an Access table specified by the user
+'User supplies file name and Mneumonic
+'program attempts to optimize by identifying date fields, numeric fields, and text fields, and limiting the maximum size
+
+Dim wrkJet As Workspace
+Dim rsTemp As Recordset
+Dim dbTarget As Database
+Dim tdfTargetTable As TableDef
+Dim idxRowOffset As Index
+Dim rngOrigSelection As Range
+Dim rngSourceData As Range
+Dim rngCurVals As Range
+Dim rngFirstRow As Range
+Static TargetFileName As String
+Dim TargetTableName As String
+Static MneumonicName As String
+Dim FieldName As String
+Dim FieldNames() As String
+Dim ColTypes() As String
+Dim ColSizes() As Integer
+Dim UserResponse As Variant
+Dim ErrCode As Integer
+Dim i As Long
+Dim j As Long
+Dim RowCnt As Long
+Dim ColCnt As Integer
+Dim AddOrderFld As Boolean
+Dim FirstRowHasNames As Boolean
+Const DEFAULTFILENAME = "C:\programdata\2013\zIndustryData\MiscScheds.mdb"
+Const DEFAULTTABLENAME = "MyJunk"
+'Const DEFAULTMNEUMONICNAME = "MyJunk"
+'Const DEFAULTFILENAME = "G:\Data\Capital Markets\ChrisFahey\zIndustryData\MiscScheds.mdb"
+
+'Const DEFAULTTABLENAME = "MyJunk"
+    Application.StatusBar = ""
+    'now we have a temp table name and an array of number / text, and text size, create the fields in a temporary table
+    'lastly, upload the data from the range into the Access table
+    If TypeName(ActiveSheet) <> "Worksheet" Or TypeName(Selection) <> "Range" Then 'confirm that what has been selected is a worksheet and not a chart or other object
+        MsgBox "Please select a range of CUSIPs first"
+        GoTo MyExit
+    Else
+        Set rngOrigSelection = Selection
+        Set rngSourceData = Selection
+    End If
+
+    'Determine # of rows and columns in selected range
+    RowCnt = rngSourceData.Rows.Count
+    ColCnt = rngSourceData.Columns.Count
+    'Redim arrays
+    If ColCnt > 1 Then
+        ReDim ColSizes(ColCnt - 1)
+        ReDim ColTypes(ColCnt - 1)
+        ReDim FieldNames(ColCnt - 1)
+    Else
+        ReDim ColSizes(ColCnt)
+        ReDim ColTypes(ColCnt)
+        ReDim FieldNames(ColCnt)
+    End If
+
+    Application.StatusBar = "Identifying data counts and data types"
+
+    Set rngFirstRow = Range(rngSourceData.Cells(1, 1), rngSourceData.Cells(1, ColCnt))
+
+    'Is the first row all text? If so, ask user if the first row contains field names, and if so, move (corrected) field names into appropriate array
+    ErrCode = FirstRowAllLabels(rngFirstRow)
+
+    If ErrCode = 1 Then 'There are no errors - So ask user if the first row contains field names, and if so, move (corrected) field names into appropriate array
+        UserResponse = InputBox("Does the first row contain field names you wish to use?" & vbCrLf & "(1 or yes = yes, use first row as field names" & _
+        " 0 or no = no, the first row is just data.", "TARGET FILE", 1)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            FirstRowHasNames = True
+            'change the Source Data to exclude first row
+            Set rngSourceData = Range(rngSourceData.Cells(2, 1), rngSourceData.Cells(RowCnt, ColCnt))
+            RowCnt = rngSourceData.Rows.Count
+        End If
+    End If
+
+    For j = 0 To ColCnt - 1
+        Set rngCurVals = rngSourceData.Columns(j + 1) 'Range(rngSourceData.cell(1, 1), rngSourceData.Offset(RowCnt - 1, 0))
+        rngCurVals.Select
+        Application.StatusBar = "Identifying data counts and data types for column #" & j + 1 & " of " & ColCnt
+        ErrCode = IDFieldInfoInRange(rngCurVals, ColSizes(j), ColTypes(j), RowCnt)
+    Next j
+    Application.StatusBar = "Review of data types for all columns is complete."
+
+    'Now that the data types are known, get the ACCESS file name to store the data
+    If Len(TargetFileName) > 0 Then
+        UserResponse = InputBox("Enter ACCESS File to Receive Excel Data " & vbCrLf & "(i.e. C:\programdata\2013\ZREFDATA.MDB)", "TARGET FILE", TargetFileName)
+    Else
+        UserResponse = InputBox("Enter ACCESS File to Receive Excel Data " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", DEFAULTFILENAME)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    TargetFileName = UCase(TrimMyString(UserResponse))
+    'next, ask for a table Mneumonic
+    If Len(MneumonicName) > 0 Then
+        UserResponse = InputBox("What suitably describes this data to be stored?", "TARGET FILE", MneumonicName)
+    Else
+        UserResponse = InputBox("What suitably describes this data to be stored?", "TARGET FILE", DEFAULTTABLENAME)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    MneumonicName = UCase(TrimMyString(UserResponse))
+    MneumonicName = RemoveAllSpaces(MneumonicName)
+    'Determine the temp table name
+    TargetTableName = MakeTmpName(MneumonicName)
+    'Does the file exist?  If it doesn't exist, ask user if they want to create it. If they don't, abort process, else create the file.
+    If Len(Dir$(TargetFileName)) = 0 Then ' the file doesn't exist, so ask if you want to create it
+        UserResponse = InputBox("The file " & TargetFileName & " does not currently exist." & vbCrLf & "Do you want to create a new file? " & vbCrLf & "0 or no => NO, I don't want a new file created." & vbCrLf & "1 or YES = I want to create a new ACCESS file.")
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 0 Or UserResponse = "0" Or UCase(UserResponse) = "NO" Or UCase(UserResponse) = "FALSE" Or UserResponse = False Then 'abort processing
+            MsgBox "Transfer Aborted.  Restart to complete. "
+            GoTo MyExit
+        Else ' create the new file!
+            SysCmd acSysCmdSetStatus, "ToolbarGenStash: Creating Access database file " & TargetFileName & ". "
+            Set wrkJet = DBEngine.Workspaces(0)
+            Set dbTarget = wrkJet.CreateDatabase(TargetFileName, dbLangGeneral, dbVersion40) 'create a new Access File, using the targettablename
+        End If
+    Else 'the file exists, so open it
+        Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+        Set dbTarget = wrkJet.OpenDatabase(TargetFileName)
+        j = DropExistingTable(dbTarget, TargetTableName)
+        If j = -1 Then
+            MsgBox "Table unable to be deleted. Aborting process!"
+            GoTo MyExit
+        End If
+    End If
+
+    'next, ask whether order of date records is important
+    UserResponse = InputBox("Lastly, is the original order of your records important? " & vbCrLf & vbCrLf & "If it is, an order field will be added." & vbCrLf & vbCrLf & "0 or no => NO, then the order is NOT important." & vbCrLf & "1 or YES => then the order of the records IS important.", "ADD AN ORDER FIELD?", 1)
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    UserResponse = UCase(TrimMyString(UserResponse))
+    If UserResponse = "1" Or UserResponse = 1 Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then AddOrderFld = True
+
+    Application.StatusBar = "Making Temporary Table. . ."
+    'now create the table
+    Set tdfTargetTable = dbTarget.CreateTableDef(TargetTableName)
+    'create the table, with fields
+    If FirstRowHasNames Then 'fix the column names
+        For j = 0 To ColCnt - 1
+            FieldNames(j) = rngFirstRow.Cells(1, j + 1)
+        Next j
+        FixColNames FieldNames, ColCnt
+    End If
+    For j = 0 To ColCnt - 1
+        If FirstRowHasNames Then
+            FieldName = FieldNames(j)
+        Else
+            FieldName = "FIELD" & CStr(j + 1)
+        End If
+        If ColTypes(j) = "TEXT" Then 'ColSizes(j), ColTypes(j)
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbText, ColSizes(j))
+        ElseIf ColTypes(j) = "INTEGER" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbInteger) 'Integer
+        ElseIf ColTypes(j) = "LONG" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbLong) 'long
+        ElseIf ColTypes(j) = "FLOAT" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDouble) 'Float
+        ElseIf ColTypes(j) = "BYTE" Then
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbByte) 'byte
+        ElseIf ColTypes(j) = "DECIMAL" Then
+            'tdfTargetTable.CreateField(FieldName, dbDecimal) 'Decimal
+            tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDouble)  ' dbCurrency) 'Decimal
+            'Call SetPropertyDAO(dbTarget.TableDefs(TargetTableName).Fields(FieldName), "DecimalPlaces", dbDecimal, CByte(2))
+        Else ' the default for a number
+            MsgBox "Unrecognized Data Type for Fieldname " & FieldNames(j) & ". Exiting.  Fix program and restart."
+            GoTo MyExit
+            'tdfTargetTable.Fields.Append tdfTargetTable.CreateField(FieldName, dbDecimal)
+        End If
+    Next j
+
+    If AddOrderFld Then
+        tdfTargetTable.Fields.Append tdfTargetTable.CreateField("ORDER", dbLong)
+        'add an index, so cusips are arranged properly all the time
+        Set idxRowOffset = tdfTargetTable.CreateIndex("RowNum")
+        idxRowOffset.Fields.Append idxRowOffset.CreateField("Order", dbLong)
+
+        tdfTargetTable.Indexes.Append idxRowOffset
+        tdfTargetTable.Indexes.Refresh
+    End If
+
+    dbTarget.TableDefs.Append tdfTargetTable
+    dbTarget.TableDefs.Refresh
+
+    Application.StatusBar = "Temporary Table Made. Loading spreadsheet data . . ."
+
+    Set rsTemp = dbTarget.OpenRecordset(TargetTableName, dbOpenTable)
+    'load cusips into the temporary table, checking to be sure that they are 9 characters long
+    'RecCount = rngSourceData.Rows.Count
+    Set rngCurVals = rngSourceData.Cells(1, 1) 'Columns(j + 1) 'Range(rngSourceData.cell(1, 1), rngSourceData.Offset(RowCnt - 1, 0))
+
+    rngCurVals.Select
+
+    For i = 1 To RowCnt
+        rsTemp.AddNew
+        For j = 1 To ColCnt
+            If FirstRowHasNames Then
+                FieldName = FieldNames(j - 1)
+            Else
+                FieldName = "FIELD" & CStr(j)
+            End If
+
+            'TargetFileName = CStr(rngSourceData.Cells(i, J).Value)
+            rsTemp.Fields(FieldName).Value = rngSourceData.Cells(i, j).Value
+        Next j
+        If AddOrderFld Then rsTemp.Fields("Order").Value = i
+        rsTemp.Update
+    Next i
+    Application.StatusBar = "Transfer Complete. " & ColCnt & " column(s) of " & RowCnt & " row(s) of data was uploaded into table " & TargetTableName & " in file " & TargetFileName
+
+    rsTemp.Close
+    dbTarget.Close
+    wrkJet.Close
+    rngOrigSelection.Select
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description & vbCrLf & "Column: " & j & ", Row: " & i & "."
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description & "i:" & i & ", j:" & j & "."
+    Err.Clear
+MyExit:
+    Set rsTemp = Nothing
+    Set tdfTargetTable = Nothing
+    Set idxRowOffset = Nothing
+    Set dbTarget = Nothing
+    Set wrkJet = Nothing
+    Set rngSourceData = Nothing
+    Set rngOrigSelection = Nothing
+    Set rngCurVals = Nothing
+    Set rngFirstRow = Nothing
+End Sub
+
+Sub ToolbarGenFetch()
+On Error GoTo ErrorHandler
+'written 2/8/12 by cfahey
+'this brings down relevant info from a specified table into Excel
+Dim wrkJet As DAO.Workspace
+Dim dbSource As DAO.Database
+Dim rsTemp As DAO.Recordset
+Dim N As Object
+Dim strFields As String
+Dim CurrentAddr As Range
+Dim obTimer As New CHighResTimer
+Dim MyTime As Double
+Dim j As Byte
+Dim CurAddr  As String
+Static SourceFileName As String
+Static SourceTableName As String
+Dim strSQL As String
+Dim UserResponse As Variant
+Dim i As Long
+Dim SourceTableExists As Boolean
+Dim DropAfterUse As Boolean
+Dim ProvideHeadings As Boolean
+Dim MyDataSource As Byte 'if 1, a table, if 2, a query
+
+Const DEFAULTFILENAME = "C:\CMData\2013\zIndustryData\SecurityScheds.mdb"
+'Const DEFAULTFILENAME = "C:\ProgramData\zBBergData1.mdb"
+'Static DEFAULTTABLENAME As String
+Const DEFAULTTABLENAME = "DebtData"
+Const ALLOWDROPAFTERUSE = 0
+
+    obTimer.StartTimer
+    Application.StatusBar = " "
+    Application.Calculation = xlCalculationManual
+'    If Len(DEFAULTTABLENAME) = 0 Then DEFAULTTABLENAME = MakeTmpName("Table")
+    
+    'only one cell specified?
+    UserResponse = InputBox("NOTE THAT ANY PRIOR DATA WILL NOT BE DELETED!" & vbCrLf & vbCrLf & _
+        "Is the cursor positioned on the North West corner of the range to receive the data? " & vbCrLf & vbCrLf & _
+        "1, YES, or TRUE = Yes, it is in the spot to receive data" & vbCrLf & _
+        "0, NO, or FALSE = I want to cancel, reposition the cursor, and restart.", "TARGET CELL SPECIFICATION", 1)
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    If UserResponse = 0 _
+      Or UserResponse = "0" _
+      Or UCase(UserResponse) = "NO" _
+      Or UCase(UserResponse) = "FALSE" _
+      Or UserResponse = False _
+      Or Selection.Rows.Count > 1 _
+      Or Selection.Columns.Count > 1 Then 'there should only be 1 cell specified!
+        MsgBox "Please restart." & vbCrLf & " Note that you need to specify only 1 cell, to be located in the " & vbCrLf & _
+        "upper left hand corner, for the data retrieval function. "
+        GoTo MyExit
+    Else
+'''        TargetAddr = ""
+        Set CurrentAddr = Selection.Cells(1, 1)
+        CurAddr = CurrentAddr.Address
+    End If
+'''    If UserResponse = 0 Or UserResponse = "0" Or UCase(UserResponse) = "NO" Or UCase(UserResponse) = "FALSE" Then
+'''        TargetAddr = ""
+'''        ProvideHeadings = True
+'''    Else
+'''        TargetAddr = ""
+'''    End If
+    If ALLOWDROPAFTERUSE Then
+        UserResponse = InputBox("Do you want to delete the table after you have imported the data into Excel? " & vbCrLf & "1, YES, or TRUE = Yes, please provide headings" & vbCrLf & "0, NO, or FALSE = I already have headings, I just want the data.", "NEED HEADINGS", 0)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            DropAfterUse = True
+        End If
+    End If
+    If Len(SourceFileName) = 0 Then  'Now where is the table located?
+        UserResponse = InputBox("Enter the ACCESS Source FILE name: " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", DEFAULTFILENAME)
+    Else
+        UserResponse = InputBox("Enter the ACCESS Source FILE name: " & vbCrLf & "(i.e. C:\ProgramData\2013\ZREFDATA.MDB)", "TARGET FILE", SourceFileName)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    SourceFileName = UCase(TrimMyString(UserResponse))
+    
+    'Does the file exist?  If it doesn't exist, ask user if they want to create it. If they don't, abort process, else create the file.
+    If Len(Dir$(SourceFileName)) = 0 Then
+        MsgBox "That ACCESS file doesn't exist. Please check the directory and the source ACCESS file name before restarting. " ' the file doesn't exist
+        GoTo MyExit
+    End If
+    
+    'open the source file
+    Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+    Set dbSource = wrkJet.OpenDatabase(SourceFileName, dbReadOnly)
+    
+    'Application.Calculation = xlCalculationManual
+    
+    If Len(SourceTableName) = 0 Then
+        UserResponse = InputBox("Enter the ACCESS TABLE to fetch: " & vbCrLf & "(i.e. MYJunk)", "TARGET FILE", DEFAULTTABLENAME)
+    Else
+        UserResponse = InputBox("Enter the ACCESS TABLE to fetch: " & vbCrLf & "(i.e. MYJunk)", "TARGET FILE", SourceTableName)
+    End If
+    If Len(UserResponse) = 0 Then GoTo MyExit
+    
+    SourceTableName = UCase(TrimMyString(UserResponse))
+        
+    'the file exists, does the table exist in the file?
+    SourceTableExists = False
+    
+    For Each N In dbSource.TableDefs
+        If UCase(N.Name) = SourceTableName Then
+            MyDataSource = 1
+            SourceTableExists = True
+            Exit For
+        End If
+    Next N
+
+    If MyDataSource = 0 Then 'check to see if the specified table was really a query
+        For Each N In dbSource.QueryDefs
+            If UCase(N.Name) = SourceTableName Then
+                SourceTableExists = True
+                SourceTableName = N.Name 'in case there is a problem with case sensitivity later
+                MyDataSource = 2
+                Exit For
+            End If
+        Next N
+    End If
+    
+    If SourceTableExists Then
+        If MyDataSource = 1 Then
+            strFields = MakeFieldString(dbSource, SourceTableName, True)
+        ElseIf MyDataSource = 2 Then 'retrieve data fields from query
+            strFields = MakeQueryFieldString(dbSource, SourceTableName, False)
+        Else
+            MsgBox "Specified data sourcce " & SourceTableName & " not found in file " & SourceFileName & " as either a Table or Query. Please confirm table/query exists, then restart."
+            GoTo MyExit
+        End If
+    End If
+    strSQL = " SELECT " & strFields & " FROM " & SourceTableName & " ; "
+    
+    'now open the recordset
+    Set rsTemp = dbSource.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    rsTemp.MoveLast
+    If rsTemp.RecordCount > 1048550 Then 'there are too many records in the table!
+        MsgBox "there are well over 1 million records to be downloaded.  It is too large to dump into an Excel spreadsheet. " & vbCrLf & vbCrLf & "You must find another way!"
+        GoTo MyExit
+    End If
+    rsTemp.MoveFirst ' I don't know if this step is necessary!
+    
+    'does the user want column headings?
+    UserResponse = InputBox("Do you want column headings as a first row? " & vbCrLf & "1, YES, or TRUE = Yes, please provide headings" & vbCrLf & "0, NO, or FALSE = I already have headings, I just want the data.", "NEED HEADINGS", 0)
+    If Len(UserResponse) = 0 Then
+        GoTo MyExit
+    Else
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Then
+            CopyRSHeaders rsTemp, ActiveSheet, CurrentAddr.Cells(1, 1).Address
+            'now copy the recordset
+            CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+        Else 'just copy the recordset
+            CurrentAddr.Cells(1, 1).CopyFromRecordset rsTemp  'Return the values
+        End If
+    End If
+
+    If DropAfterUse Then
+        UserResponse = InputBox("Please confirm that you want to delete the table " & SourceTableName & " in file " & vbCrLf & SourceFileName & vbCrLf & "1, YES, or TRUE = Yes, please delete the table" & vbCrLf & "0, NO, or FALSE = Please keep the table.", "CONFIRMATION OF TABLE DELETION", 0)
+        If Len(UserResponse) = 0 Then GoTo MyExit
+        If UserResponse = 1 Or UserResponse = "1" Or UCase(UserResponse) = "YES" Or UCase(UserResponse) = "TRUE" Or UserResponse = True Then
+            strSQL = " DROP TABLE " & SourceTableName
+            dbSource.Execute strSQL
+        End If
+    End If
+    rsTemp.Close
+    dbSource.Close
+    wrkJet.Close
+    
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    Application.StatusBar = "Data Retrieval Complete.  Run Time: " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Application.Calculation = xlCalculationAutomatic
+    Set N = Nothing
+    Set CurrentAddr = Nothing
+    Set rsTemp = Nothing
+    Set dbSource = Nothing
+    Set wrkJet = Nothing
+    Set obTimer = Nothing
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+
+Sub CopyRSHeaders(ByRef ipRS As DAO.Recordset, ByRef ipWkSht As Excel.Worksheet, ipNWCornerLoc As String)
+'added 8/9/12 by CFahey
+'this dumps column names into the Excel spreadsheet.  Adapted from an Access VBA module
+Dim MyDumpRng As Excel.Range
+Dim i As Integer
+Dim fldName As Object
+    i = 0
+    Set MyDumpRng = ipWkSht.Range(ipNWCornerLoc)
+    For Each fldName In ipRS.Fields
+        MyDumpRng.Offset(0, i).Value = fldName.Name
+        i = i + 1
+    Next fldName
+
+MyExit:
+    Set MyDumpRng = Nothing
+    Set fldName = Nothing
+End Sub
+
+Function MakeFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT ipStatement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim tdfCurr As DAO.TableDef
+Dim fldCurr As DAO.Field
+
+    Set tdfCurr = ipDB(ipTableName)
+    FirstField = True
+    For Each fldCurr In tdfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeFieldString = fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & fldCurr.Name
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeFieldString = ipTableName & "." & fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & ipTableName & "." & fldCurr.Name
+                End Select
+            End If
+        End If
+    Next fldCurr
+
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+
+MyExit:
+    Set fldCurr = Nothing
+    Set tdfCurr = Nothing
+End Function
+Function MakeQueryFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT ipStatement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim QryDfCurr As DAO.QueryDef
+Dim fldCurr As DAO.Field
+
+    Set QryDfCurr = ipDB.QueryDefs(ipTableName)
+    FirstField = True
+    
+    For Each fldCurr In QryDfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeQueryFieldString = fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeQueryFieldString = MakeQueryFieldString & ", " & fldCurr.Name
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeQueryFieldString = ipTableName & "." & fldCurr.Name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.Name
+                    Case "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeQueryFieldString = MakeQueryFieldString & ", " & ipTableName & "." & fldCurr.Name
+                End Select
+            End If
+        End If
+
+    Next fldCurr
+    GoTo MyExit
+    
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+
+MyExit:
+    Set fldCurr = Nothing
+    Set QryDfCurr = Nothing
+End Function
+
+Function DropExistingTable(ByRef ipDB As DAO.Database, ipTableName As String) As Integer
+'written 11/2/11 by cfahey
+'this returns a 1 (true) if a table exists in a given Access file, 0 (false) otherwise
+
+Dim MyTd As DAO.TableDefs
+Dim N As Object
+    On Error GoTo ErrorHandler
+
+    DropExistingTable = 1
+    For Each N In ipDB.TableDefs
+        If N.Name = ipTableName Then
+            DropExistingTable = 0
+            ipDB.Execute "Drop table " & ipTableName
+            GoTo MyExit
+        End If
+    Next N
+    GoTo MyExit
+ErrorHandler:
+    DropExistingTable = -1
+MyExit:
+    Set MyTd = Nothing
+    Set N = Nothing
+End Function
+
+Sub FixColNames(ByRef ipNames() As String, ipColCnt As Integer)
+'This routine will create a linked list, ordering the column names alphabetically, removing any spaces from the names as we process.
+'Next, it will go through the linked list, identifying when adjacent names are equivalent.
+'If col names are equivalent, then it will append a number to make the col name unique
+Dim i As Integer
+Dim j As Integer
+Dim ListOrder() As Integer
+Dim NewOrder() As String
+Dim FirstPtr As Integer
+Dim FirstColVal As String
+Dim TmpPtr As Integer
+Dim PrevPtr As Integer
+Dim DupCounter As Byte
+Dim CurColName As String
+'Dim ValueWasInserted As Boolean
+Dim PrevColName As String
+'Dim LastPtr As Integer
+'Dim LastColPtr As Integer
+Const TERMINALVALUE = 31999
+
+    ReDim ListOrder(ipColCnt)
+    ReDim NewOrder(ipColCnt)
+    
+    FirstPtr = 0
+    FirstColVal = ipNames(0)
+    
+    ListOrder(FirstPtr) = TERMINALVALUE ' LastColPtr
+    'order all the column names
+    If ipColCnt > 1 Then
+        For i = 1 To ipColCnt - 1
+            ipNames(i) = RemoveSpaceChars(ipNames(i)) 'first, clean the col name
+            ipNames(i) = RemoveBadChars(ipNames(i))
+            If ipNames(i) < FirstColVal Then  'make the current value the initial value, and point current value to former initial val
+                TmpPtr = FirstPtr
+                FirstPtr = i
+                ListOrder(FirstPtr) = TmpPtr
+                FirstColVal = ipNames(i)
+            Else ' need to inject it somewhere into list
+                TmpPtr = FirstPtr
+                PrevPtr = FirstPtr
+                For j = 1 To i 'we know the current value is greater than the initial value
+                    If ListOrder(TmpPtr) = TERMINALVALUE Then 'insert into the list
+                        If ipNames(i) < ipNames(ListOrder(PrevPtr)) Then '*********** removed the equal sign
+                            ListOrder(PrevPtr) = i
+                            ListOrder(i) = TERMINALVALUE
+                        Else
+                            ListOrder(TmpPtr) = i
+                            ListOrder(i) = TERMINALVALUE
+                        End If
+                        Exit For
+                    ElseIf ipNames(i) < ipNames(ListOrder(TmpPtr)) And ListOrder(TmpPtr) <> TERMINALVALUE Then  'insert into the list '*********** removed the equal sign
+                        ListOrder(i) = ListOrder(TmpPtr)
+                        ListOrder(TmpPtr) = i
+                        Exit For
+                    Else
+                        PrevPtr = TmpPtr
+                        TmpPtr = ListOrder(TmpPtr)
+                    End If
+                Next j
+            End If
+        Next i
+'    Else 'stick the only column name into the ipNames() array
+'        ipNames(1) = ""
+    End If
+    
+    'Now that the field names are ordered, change the field names if duplicates exist
+    If ipColCnt > 1 Then
+        PrevColName = ipNames(FirstPtr)
+        TmpPtr = ListOrder(FirstPtr)
+        DupCounter = 2
+        Do
+            If ipNames(TmpPtr) = PrevColName Then
+                ipNames(TmpPtr) = ipNames(TmpPtr) & CStr(DupCounter)
+                DupCounter = DupCounter + 1
+            Else
+                DupCounter = 2
+                PrevColName = ipNames(TmpPtr)
+            End If
+    '        PrevColName = ipNames(TmpPtr)
+            TmpPtr = ListOrder(TmpPtr)
+        Loop While TmpPtr <> TERMINALVALUE
+    End If
+    'Now the sort order is determined, check for duplicate column names and if they exist, change the name to make them unique
+End Sub
+
+Function FirstRowAllLabels(ipInputRng As Range) As Integer
+Dim ColCnt As Integer
+Dim i As Integer
+Dim CurVal As Variant
+Dim NonTextFound
+    FirstRowAllLabels = 1
+    'ipInputRng.Select
+    ColCnt = ipInputRng.Columns.Count
+    For i = 1 To ColCnt
+        CurVal = ipInputRng.Cells(1, i).Value
+       ' If Application.WorksheetFunction.IsNonText(ipInputRng.Offset(0, i).Value) = False Then
+       'MsgBox CurVal
+        If Application.WorksheetFunction.IsText(ipInputRng.Cells(1, i).Value) = False Then
+            FirstRowAllLabels = 0
+            Exit For
+        End If
+    Next i
+End Function
+
+Function SpacesFound(ipTxt As String) As Boolean
+Dim CharCnt As Long
+Dim i As Long
+    SpacesFound = False
+    CharCnt = Len(ipTxt)
+    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            If Mid(ipTxt, i, 1) = " " Then
+                SpacesFound = True
+                Exit For
+            End If
+        Next i
+    End If
+End Function
+
+Function RemoveSpaceChars(ipTxt As String) As String
+Dim CharCnt As Long
+Dim i As Long
+    CharCnt = Len(ipTxt)
+    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            If Mid(ipTxt, i, 1) <> " " Then RemoveSpaceChars = RemoveSpaceChars & Mid(ipTxt, i, 1)
+        Next i
+    End If
+End Function
+
+Function RemoveBadChars(ipTxt As String) As String
+'written 3/20/13 by cfahey
+'this function strips out all non-alphanumeric chars; originally meant to avoid bad column names
+Dim CharCnt As Long
+Dim CharVal As Integer
+Dim i As Long
+    CharCnt = Len(ipTxt)
+    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            CharVal = Asc(Mid(ipTxt, i, 1))
+            'MsgBox CharVal
+            If (CharVal > 47 And CharVal < 58) Or (CharVal > 64 And CharVal < 91) Or (CharVal > 96 And CharVal < 123) Then RemoveBadChars = RemoveBadChars & UCase(Mid(ipTxt, i, 1))
+        Next i
+    End If
+End Function
+
+Sub IDUniqueVals()
+On Error GoTo ErrorHandler
+'this dumps unique values in a selected range (single column) to a target cell
+Dim UserResponse As Variant
+Dim SrcRng As Range
+Dim TgtRng As Range
+Static DefTarget As String  'to save the target cell value
+
+    'test that a range is selected or row > 1
+    Set SrcRng = Selection
+
+    If SrcRng.Columns.Count > 1 Or SrcRng.Rows.Count < 2 Then
+        Application.StatusBar = "Please choose a valid range, of only 1 column and more than 1 row"
+        GoTo MyExit
+    End If
+
+    If Len(DefTarget) = 0 Then 'DefTarget hasn't been used before, so pick any cell as a default
+        UserResponse = InputBox("Target Cell: ", "TARGET FILE", "D5")
+    Else
+        UserResponse = InputBox("Target Cell: ", "TARGET FILE", DefTarget)
+    End If
+
+    If UserResponse = 0 Or UserResponse = "" Or Len(UserResponse) = 0 Then
+        GoTo MyExit
+    Else
+        DefTarget = UCase(CStr(UserResponse))
+
+        'change the Source Data to exclude first row
+        SrcRng.AdvancedFilter Action:=xlFilterCopy, CopyToRange:=Range(DefTarget), Unique:=True 'run the filter
+        DefTarget = Range(DefTarget).Offset(0, 1).Address(0, 0) 'Now, before leaving, move default cell one column to the right
+
+    End If
+
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error#: " & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error#: " & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+    Set SrcRng = Nothing
+    Set TgtRng = Nothing
+
+End Sub
+
+Function RemoveAllSpaces(ipLine As String) As String
+Dim i As Integer
+Dim CharCnt As Integer
+    CharCnt = Len(ipLine)
+    For i = 1 To CharCnt
+        If Mid(ipLine, i, 1) <> " " Then RemoveAllSpaces = RemoveAllSpaces & Mid(ipLine, i, 1)
+    Next i
+End Function
+
+Function IDFieldInfoInRange(ipCurRng As Range, ByRef ipColSize As Integer, ByRef ipColType As String, ipRowCnt As Long) As Integer
+On Error GoTo ErrorHandler
+'Originally meant to include date values, this function just determines whether the column contains any text values, or are all numbers
+'IMPROVEMENT:  I must be able to distinguish between an integer and a real value.  Currently, the default is just integers
+'Types to provide:  TEXT, NUMBER, FLOAT, also now Decimals, to handle 100Bil values.
+Dim i As Long
+Dim UserResponse As String
+Dim MyLen As Integer
+Dim CellValFloat As Double
+Dim CellValCCY As Currency
+Dim MaxNumVal As Variant
+'Dim MaxValOffset As Long
+Dim TextFound As Boolean
+Dim FloatFound As Boolean
+
+    IDFieldInfoInRange = 0
+    ipColType = "NUMBER" 'basically, an integer number
+    For i = 0 To ipRowCnt - 1
+        MyLen = Len(CStr(ipCurRng.Value2(i + 1, 1)))
+        If MyLen > ipColSize Then ipColSize = MyLen 'read all the values, and ensure that the field length is sufficient to hold the max length
+        
+        If TextFound = False Then
+            If IsNumeric(ipCurRng.Value2(i + 1, 1)) = False Then
+                TextFound = True
+                ipColType = "TEXT"
+            Else
+                If ipCurRng.Value2(i + 1, 1) > MaxNumVal And FloatFound = False Then
+                    MaxNumVal = ipCurRng.Value2(i + 1, 1)
+                    'MaxValOffset = i + 1
+                End If
+                If IsNumeric(ipCurRng.Value2(i + 1, 1)) = True And FloatFound = False Then 'check to see if it is a floating number. Default is integer, w/ no fractional part
+                    CellValFloat = ipCurRng.Value2(i + 1, 1)
+                    CellValCCY = CCur(ipCurRng.Value2(i + 1, 1))
+                    If (Round(CellValFloat, 8) - CellValCCY) > 0 Then 'the number is a floater!
+                        FloatFound = True
+                        ipColType = "FLOAT"
+                    End If
+                End If
+            End If
+        End If
+        If i = 500 Then 'test to see if further analysis is worth it!
+            UserResponse = InputBox("500 field values have been reviewed in the current column. " & vbCrLf & _
+            "There are " & ipRowCnt - 500 & " values to still review. " & vbCrLf & _
+            "Type is currently " & ipColType & vbCrLf & _
+            "Is further review of values necessary? (0 or n = No, 1 or y = Yes", "CONTINUE REVIEW OF DATA TYPES?", 0)
+            If Len(UserResponse) = 0 _
+              Or UserResponse = 0 _
+              Or UserResponse = "0" _
+              Or UCase(UserResponse) = "NO" _
+              Or UCase(UserResponse) = "N" _
+              Or UCase(UserResponse) = "FALSE" _
+              Or UserResponse = False Then Exit For
+        End If
+    Next i
+    'if it isn't a floating value, determine whether the value will fit into an integer, a long, or a decimal
+MyNextStep:
+    If TextFound = False And FloatFound = False Then 'here is where we change the value "NUMBER" to a specific type, so long as field isn't float or text
+        If MaxNumVal < 256 Then
+            ipColType = "BYTE"
+        ElseIf MaxNumVal < 32769 Then
+            ipColType = "INTEGER"
+        ElseIf MaxNumVal < 2147483647 Then
+            ipColType = "LONG"
+        Else
+            ipColType = "DECIMAL"
+        End If
+    End If
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error! " & Err.Number & ", " & Err.Description
+    Application.StatusBar = "Error! " & Err.Number & ", " & Err.Description
+    'ipCurRng.Select
+    Err.Clear
+    IDFieldInfoInRange = -1
+MyExit:
+    'MsgBox "TYPE: " & ipColType & ", Max Length: " & ipColSize
+End Function
+
+'==================================================================================================================
+' These next two functions were used to join bloomberg data in an excel spreadsheet, and it mimics to a degree 
+' the bloomberg download functions from a bloomberg terminal. The user uploads to an Access database a list of  
+' unique cusips.  Next, the user highlights a number of column names, and the second function downloads, one 
+' at a time, the field values which match the CUSIPS (or blanks if no value exists), the fields being the 
+' names in the range selected by the user before executing the function.  "Upload" means to move the list of 
+' unique cusips from Excel to Access.  "Download" or "Fetch" runs a series of SQL queries on the Access database, joining 
+' the list of unique CUSIPS in the uploaded table in access to the relevant bloomberg table. 
+'==================================================================================================================
+Sub ToolbarBBStash()
+On Error GoTo ErrorHandler
+'written 2/8/12 by cfahey
+'this loads a list of cusips into the local Access table
+Dim UserWorkbook As Workbook
+Dim MyWrkSheet As Worksheet
+Dim TargetWorkSheet As Worksheet
+Dim wrkJet As Workspace
+Dim rsTemp As Recordset
+Dim dbBB As Database
+Dim tdfTargetTable As TableDef
+Dim idxRowOffset As Index
+Dim CUSIPRange As Range
+Dim CurrentAddr As Range
+Dim CurrentBook As String
+Dim N As Object
+Dim M As Object
+Dim i As Long
+Dim LastRow As Long
+Dim IDLoc As Integer
+Dim NotFound As Boolean
+Dim FoundWorkBook As Boolean
+Dim FoundWorkSheet As Boolean
+Dim FoundFileName As Boolean
+
+Dim TargetFileName As String
+Dim TmpTable As String
+Dim RefTableFound As Boolean
+
+Dim CurrentCUSIP As String
+'Dim RangeAddr As String
+Dim RecCount As Long
+Dim Across3Cols As Boolean
+Dim strSQL As String
+
+Const ReferenceID = "BBDATA"
+Const RefWkSheetName = "REFS" 'the sheet name in this PERSONAL.XLS workbook
+Const RefTableNWLoc = "A1"
+Const RefName = "BBData" 'the name to look up in the locations table
+Const PERSONALMACROFILE = "PERSONAL.XLS" '<<< NB - This HAS to be in upper case!
+
+    'is there an array of cusips, or just one?
+    If TypeName(ActiveSheet) <> "Worksheet" Or TypeName(Selection) <> "Range" Then 'confirm that what has been selected is a worksheet and not a chart or other object
+        MsgBox "Please select a range of CUSIPs first"
+        GoTo MyExit
+    Else
+        Set CUSIPRange = Selection
+    End If
+    If CUSIPRange.Columns.Count = 3 Then
+        Across3Cols = True
+    Else
+        Across3Cols = False
+    End If
+
+    'work on getting location of file to stash the CUSIPs
+    Set UserWorkbook = ActiveWorkbook 'if there are several workbooks open, this allows us to get back to the correct workbook
+    CurrentBook = UserWorkbook.Name 'this is just a check
+
+    For Each N In Application.Workbooks
+            'CurrentBook = UCase(N.Name)
+        If UCase(N.Name) = PERSONALMACROFILE Then 'look in this workbook for the relevant table
+            FoundWorkBook = True
+            For Each M In N.Worksheets
+                'CurrentBook = M.Name
+                If M.Name = RefWkSheetName Then ' the worksheet name is found. search range for info
+                    FoundWorkSheet = True
+                    Set TargetWorkSheet = M
+                    'Application.Worksheets(RefWkSheetName).Select
+                    '      Application.Range(Application.Range(RefTableNWLoc), Application.Range(RefTableNWLoc).Offset(60, 2)).Select
+                    TargetWorkSheet.Activate
+                    TargetWorkSheet.Range(RefTableNWLoc).CurrentRegion.Select
+                    LastRow = Selection.Rows.Count
+                    'TargetWorkSheet.Range(RefTableNWLoc).Select
+                    'TargetWorkSheet.Range(TargetWorkSheet.Range(RefTableNWLoc), TargetWorkSheet.Range(RefTableNWLoc).Offset(10, 2)).Select
+                    ''Application.Workbooks(N.Name).Worksheets.
+                    'M.Range(RefTableNWLoc).CurrentRegion.Select
+                    'LastRow = Selection.Rows.Count
+                    'loop through the refence table, until you find the right entry, then get out!
+                    'LastRow = 10
+                    For i = 0 To LastRow 'run through the identifiers, one at a time, to find the match
+                        'CurrentBook = Trim(UCase(Application.Range(RefTableNWLoc).Offset(i, 0).Value))
+                        If Trim(UCase(Application.Range(RefTableNWLoc).Offset(i, 0).Value)) = Trim(UCase(RefName)) Then
+                            'TargetTableName = Range(RefTableNWLoc).Offset(i, 1).Value 'we don't need a table name - we're gonna make 1!
+                            TargetFileName = Range(RefTableNWLoc).Offset(i, 2).Value
+                            TmpTable = MakeTmpName("CUSIPS")
+                            FoundFileName = True
+                            Exit For
+                        End If
+                    Next i
+                    If FoundFileName Then
+                        Exit For
+                    Else
+                        MsgBox "MACRO ERROR: REFERENCE ID IN TABLE NOT FOUND.  PLEASE REPORT PROBLEM TO NAIC-SVO!"
+                        GoTo MyExit
+                    End If
+                End If
+            Next M
+            If FoundFileName Then
+                Exit For
+            Else
+                MsgBox "UNABLE TO FIND SPREADSHEET REFS IN PERSONAL MACRO SPREADSHEET! " & vbCrLf & "UNABLE TO CONTINUE." & vbCrLf & "PLEASE REPORT PROBLEM TO NAIC-SVO!"
+            End If
+        End If
+    Next N
+
+    Set N = Nothing
+
+    If FoundWorkBook = False Then
+        MsgBox "UNABLE TO FIND PERSONAL MACRO SPREADSHEET! VERY CURIOUS PROBLEM!!! PLEASE REPORT PROBLEM TO NAIC-SVO!"
+        GoTo MyExit
+    End If
+    UserWorkbook.Activate
+    'CONFIRM location of Access file, otherwise abort
+    If Len(Dir$(TargetFileName)) > 0 Then ' the file exists, so we should open it up!
+        Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+        Set dbBB = wrkJet.OpenDatabase(TargetFileName)
+
+        'does the table already exist? If so, delete it now
+        For Each N In dbBB.TableDefs
+            'CurrentBook = N.Name
+            If N.Name = TmpTable Then
+                strSQL = "drop table " & TmpTable
+                dbBB.Execute (strSQL)
+                Exit For
+            End If
+        Next N
+        Application.StatusBar = "Making Temporary Table"
+        'now create the table
+        Set tdfTargetTable = dbBB.CreateTableDef(TmpTable)
+        'create the table, with fields
+        With tdfTargetTable
+            .Fields.Append .CreateField("Order", dbLong)
+            .Fields.Append .CreateField("CUSIP", dbText, 9)
+            .Fields.Append .CreateField("ISSUER", dbText, 6) 'these next fields are used in retrieval by ISSUER code!
+'            .Fields.Append .CreateField("BOND_TYPE", dbByte)
+'            .Fields.Append .CreateField("BOND_SUBTYPE", dbByte)
+'            .Fields.Append .CreateField("EQY_SIC_CODE", dbText, 4)
+'            .Fields.Append .CreateField("INDUSTRY_SUB_GRP_NAME", dbText, 25)
+
+            'add an index, so cusips are arranged properly all the time
+            Set idxRowOffset = .CreateIndex("RowNum")
+            With idxRowOffset
+                .Fields.Append .CreateField("Order", dbLong)
+            End With
+            .Indexes.Append idxRowOffset
+            .Indexes.Refresh
+        End With
+        dbBB.TableDefs.Append tdfTargetTable
+        dbBB.TableDefs.Refresh
+
+        Application.StatusBar = "Temporary Table Made. Loading CUSIPs . . ."
+
+        Set rsTemp = dbBB.OpenRecordset(TmpTable, dbOpenTable)
+        'load cusips into the temporary table, checking to be sure that they are 9 characters long
+        RecCount = CUSIPRange.Rows.Count
+        For i = 1 To RecCount
+            If Across3Cols Then
+                CurrentCUSIP = CStr(CUSIPRange.Cells(i, 1).Value & CUSIPRange.Cells(i, 2).Value & CUSIPRange.Cells(i, 3).Value)
+            Else
+                CurrentCUSIP = CStr(CUSIPRange.Cells(i, 1).Value)
+            End If
+            If Len(CurrentCUSIP) < 9 Then
+                Do
+                    CurrentCUSIP = "0" & CurrentCUSIP 'just add leading zeros
+                Loop Until Len(CurrentCUSIP) = 9
+            ElseIf Len(CurrentCUSIP) > 9 Then
+                MsgBox "CUSIP FOUND WITH MORE THAN 9 CHARACTERS (" & CurrentCUSIP & ")." & vbCrLf & vbCrLf & "Please fix and restart!"
+                GoTo MyExit
+            End If
+            With rsTemp
+                .AddNew
+                .Fields("Order").Value = i
+                .Fields("CUSIP").Value = CurrentCUSIP
+                .Fields("ISSUER").Value = Left(CurrentCUSIP, 6)
+                .Update
+            End With
+        Next i
+        Application.StatusBar = "Transfer Complete. " & RecCount & " CUSIPs Loaded"
+    Else
+        MsgBox "Target ACCESS file does not exist.  PLEASE REPORT PROBLEM TO NAIC-SVO!"
+    End If
+
+    rsTemp.Close
+    dbBB.Close
+    wrkJet.Close
+
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+    Set rsTemp = Nothing
+    Set M = Nothing
+    Set N = Nothing
+    Set TargetWorkSheet = Nothing
+    Set tdfTargetTable = Nothing
+    Set dbBB = Nothing
+    Set wrkJet = Nothing
+    Set CUSIPRange = Nothing
+End Sub
+
+Sub ToolbarBBFetch()
+On Error GoTo ErrorHandler
+'written 2/8/12 by cfahey
+'this brings down relevant info from bberg table into Excel
+Dim wrkJet As DAO.Workspace
+Dim dbBB As DAO.Database
+Dim rsTemp As DAO.Recordset
+Dim UserWorkbook As Workbook
+Dim TargetWorkSheet As Worksheet
+Dim N As Object
+Dim M As Object
+Dim CurrentAddr As Range
+Dim obTimer As New CHighResTimer
+
+Dim MyErrorCode As String
+Dim FieldName As String
+Dim MyViewName As String
+Dim MyFieldName As String
+Dim TmpTable As String
+Dim TmpTable2 As String
+Dim TargetFileName As String
+Dim SourceFile As String
+Dim SourceTable As String
+Dim strSQL As String
+Dim CurrentBook As String
+
+Dim MyTime As Double
+
+Dim i As Long
+Dim LastRow As Long
+Dim RowsCopied As Long
+Dim CurOrder As Long
+Dim RecCount As Long
+Dim ColCount As Integer
+Dim FoundWorkBook As Boolean
+Dim FoundFileName As Boolean
+Const PERSONALMACROFILE = "PERSONAL.XLS" '<<< NB - This HAS to be in upper case!
+Const RefWkSheetName = "REFS" 'the sheet name in this PERSONAL.XLS workbook
+Const RefTableNWLoc = "A1"
+Const RefName = "BBData" 'the name to look up in the locations table
+Const CusipsTable = "KnownCUSIPS"
+Const MyTable2 = "DICTIONARY" 'data dictionary
+
+    obTimer.StartTimer
+    Application.StatusBar = " "
+
+    If Selection.Rows.Count > 1 Then 'there should only be 1 cell specified!
+        MsgBox "Please specify only 1 row for bloomberg data retrieval function."
+    End If
+    ColCount = Selection.Columns.Count
+    Set CurrentAddr = Selection.Cells(1, 1)
+
+    'Get location of Access file where data is stored
+    Set UserWorkbook = ActiveWorkbook 'if there are several workbooks open, this allows us to get back to the correct workbook
+    CurrentBook = UserWorkbook.Name 'this is just a check
+
+    For Each N In Application.Workbooks
+        If UCase(N.Name) = PERSONALMACROFILE Then 'look in this workbook for the relevant table
+            FoundWorkBook = True
+            For Each M In N.Worksheets
+                If M.Name = RefWkSheetName Then ' the worksheet name is found. search range for info
+                    Set TargetWorkSheet = M
+                    TargetWorkSheet.Activate
+                    TargetWorkSheet.Range(RefTableNWLoc).CurrentRegion.Select
+
+                    LastRow = Selection.Rows.Count
+                    'loop through the refence table, until you find the right entry, then get out!
+                    For i = 0 To LastRow 'run through the identifiers, one at a time, to find the match
+                        If Trim(UCase(Range(RefTableNWLoc).Offset(i, 0).Value)) = Trim(UCase(RefName)) Then
+                            TargetFileName = Range(RefTableNWLoc).Offset(i, 2).Value
+                            TmpTable = MakeTmpName("CUSIPS")
+                            FoundFileName = True
+                            Exit For
+                        End If
+                    Next i
+                    If FoundFileName = False Then
+                        MsgBox "MACRO ERROR: REFERENCE ID IN TABLE NOT FOUND.  PLEASE REPORT PROBLEM TO NAIC-SVO!"
+                        GoTo MyExit
+                    End If
+                End If
+            Next M
+            If FoundFileName = False Then
+                MsgBox "UNABLE TO FIND SPREADSHEET REFS IN PERSONAL MACRO SPREADSHEET! " & vbCrLf & "UNABLE TO CONTINUE." & vbCrLf & "PLEASE REPORT PROBLEM TO NAIC-SVO!"
+                GoTo MyExit
+            End If
+        End If
+    Next N
+
+    If FoundWorkBook = False Then
+        MsgBox "UNABLE TO FIND PERSONAL MACRO SPREADSHEET! VERY CURIOUS PROBLEM!!! PLEASE REPORT PROBLEM TO NAIC-SVO!"
+        GoTo MyExit
+    End If
+
+    UserWorkbook.Activate
+
+    'the file name has been located. Now open the file, and return the data
+    If Len(Dir$(TargetFileName)) > 0 Then ' the file exists, so we should open it up!
+        Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+        Set dbBB = wrkJet.OpenDatabase(TargetFileName)
+        Application.Calculation = xlCalculationManual
+
+        For i = 1 To ColCount
+            FieldName = Selection.Cells(1, i).Value
+            Set CurrentAddr = Selection.Cells(1, i)
+            Application.StatusBar = "Retrieving Information for " & FieldName
+            If UCase(FieldName) = "BOND_TYPEI" Or UCase(FieldName) = "BOND_SUBTYPEI" Then 'Use the Known_Cusips table
+                FieldName = Left(FieldName, Len(FieldName) - 1) 'take off the trailing i
+                'create a second temporary table, including possible duplicates (there will be multiple records which we remove below)
+                strSQL = " SELECT MAX(ORDER) AS MAX "
+                strSQL = strSQL & " FROM " & TmpTable
+                Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                rsTemp.MoveFirst
+                LastRow = rsTemp.Fields("MAX").Value
+                TmpTable2 = TmpTable & "2"
+                'if the table tmptable2 exists, remove it!
+                RowsCopied = DropExistingTable(dbBB, TmpTable2)
+                If RowsCopied = -1 Then GoTo MyExit 'there was a problem!
+
+                'potential sub call: DumpUniqueRecords(byref ipdb as dao.database,ipTmpTable as string, ipRefTable as string, ipFieldname as string, byref ipCurAddr as range)
+                'SELECT DISTINCT TmpTable.Order, KnownCUSIPs.BOND_TYPE
+                'INTO TmpTable2
+                'FROM TmpTable LEFT JOIN KnownCUSIPs ON TmpTable.ISSUER = KnownCUSIPs.ISSUER
+                'ORDER BY TmpTable.Order;
+                strSQL = "SELECT DISTINCT " & TmpTable & ".ORDER, " & CusipsTable & "." & FieldName & ", 0 AS COUNT "
+                strSQL = strSQL & " INTO " & TmpTable2
+                strSQL = strSQL & " FROM " & TmpTable
+                strSQL = strSQL & " LEFT JOIN " & CusipsTable
+                strSQL = strSQL & " ON " & TmpTable & ".ISSUER = " & CusipsTable & ".ISSUER "
+                strSQL = strSQL & " ORDER BY " & TmpTable & ".order ; "
+                dbBB.Execute strSQL
+                RowsCopied = dbBB.RecordsAffected
+                If RowsCopied = LastRow Then ' just make a recordset, and dump temp table info into spreadsheet
+                    strSQL = " SELECT "
+                    strSQL = strSQL & TmpTable2 & "." & FieldName
+                    strSQL = strSQL & " FROM " & TmpTable2
+                    strSQL = strSQL & " ORDER BY " & TmpTable2 & ".ORDER ; "
+                    '
+                    Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                    CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+                    rsTemp.Close
+                    Set rsTemp = Nothing
+                Else 'go through the temp table, updating Excel spreadsheet with unique data until the end of the temp table
+                    'if the field name is bond_type, clean up the data! (We don't much care about bond subtypes!)
+                    If UCase(FieldName) = "BOND_TYPE" Then
+                        'update the count field via a subquery to identify duplicate records
+                        'this is where a subquery could be used, if it wasn't so slow!
+'                        strSQL = " UPDATE " & TmpTable2
+'                        strSQL = strSQL & " SET " & TmpTable2 & ".COUNT = 2 "
+'                        strSQL = strSQL & " WHERE (SELECT COUNT(DUPE.ORDER) "
+'                        strSQL = strSQL & "         FROM " & TmpTable2 & " AS DUPE "
+'                        strSQL = strSQL & "         WHERE DUPE.ORDER = " & TmpTable2 & ".ORDER ) > 1 ; "
+'                        dbBB.Execute strSQL
+                        'change any 4s to 1 (easily identified / corrected via description)
+''                        strSQL = " UPDATE " & TmpTable2
+''                        strSQL = strSQL & " SET " & TmpTable2 & ".BOND_TYPE = 1 "
+''                        strSQL = strSQL & " WHERE " & TmpTable2 & ".BOND_TYPE = 4 ; "
+''                        dbBB.Execute strSQL
+                        'change any 13s to 8
+                        strSQL = " UPDATE " & TmpTable2
+                        strSQL = strSQL & " SET " & TmpTable2 & ".BOND_TYPE = 8 "
+                        strSQL = strSQL & " WHERE " & TmpTable2 & ".BOND_TYPE = 13 ; "
+                        dbBB.Execute strSQL
+                        'change any 6 or 7 to 9 (6 / 7 should have been identified already via direct cusip match!) Arguably, it could be 8, but again, the smaller ABS list makes it easier to correct
+                        strSQL = " UPDATE " & TmpTable2
+                        strSQL = strSQL & " SET " & TmpTable2 & ".BOND_TYPE = 9 "
+                        strSQL = strSQL & " WHERE " & TmpTable2 & ".BOND_TYPE = 6 "
+                        strSQL = strSQL & " OR " & TmpTable2 & ".BOND_TYPE = 7 ; "
+                        dbBB.Execute strSQL
+                    End If
+                    'now run the download!
+                    strSQL = " SELECT "
+                    strSQL = strSQL & TmpTable2 & ".ORDER, "
+                    strSQL = strSQL & TmpTable2 & "." & FieldName
+                    strSQL = strSQL & " FROM " & TmpTable2
+                    strSQL = strSQL & " ORDER BY " & TmpTable2 & ".ORDER ; "
+                    Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                    'CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'used only for debugging / id'ing duplicates
+                    i = 2
+                    rsTemp.MoveFirst
+                    CurOrder = 0
+                    Do While Not rsTemp.EOF
+                        If CurOrder = rsTemp.Fields("Order").Value Then 'there are multiple records with the same order number. only the first is needed!
+                             rsTemp.MoveNext
+                        Else 'there is a different Order Value!
+                            CurOrder = rsTemp.Fields("Order").Value
+                            CurrentAddr.Cells(i, 1).Value = rsTemp.Fields(FieldName).Value 'Return the values
+                            i = i + 1
+                            rsTemp.MoveNext
+                        End If
+                    Loop
+                    rsTemp.Close
+                    Set rsTemp = Nothing
+                    strSQL = "DROP TABLE " & TmpTable2
+                    dbBB.Execute strSQL
+
+                End If
+            ElseIf UCase(FieldName) = "EQY_SIC_CODEI" Or UCase(FieldName) = "INDUSTRY_SUB_GRP_NAMEI" Or UCase(FieldName) = "INDUSTRY_SUBGRP_NAMEI" Then 'use the Security_Frequent_Topic_V_1 table
+                'can this be generalized to any fieldname? I think so. . .
+                FieldName = Left(FieldName, Len(FieldName) - 1) 'take off the trailing i
+                'create a second temporary table, including possible duplicates (there will be multiple records which we remove below)
+                strSQL = " SELECT MAX(ORDER) AS MAX "
+                strSQL = strSQL & " FROM " & TmpTable
+                Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                rsTemp.MoveFirst
+                LastRow = rsTemp.Fields("MAX").Value
+                TmpTable2 = TmpTable & "2"
+                'if the table tmptable2 exists, remove it!
+                RowsCopied = DropExistingTable(dbBB, TmpTable2)
+                If RowsCopied = -1 Then GoTo MyExit 'there was a problem deleting the temporary table!
+                'confirm that the field names being searched for are in the dictionary, and if so, what table they're in
+                MyErrorCode = UseBBDictionary(dbBB, MyViewName, FieldName, MyTable2) 'we should now have identified the proper field and view names!
+
+                If MyErrorCode <> "0" Then
+                    CurrentAddr.Cells(2, 1).Value = MyErrorCode
+                    GoTo MyExit
+                End If
+
+                'create second table which contains field info and original temptable info.  there will be duplicates
+                strSQL = "SELECT DISTINCT " & TmpTable & ".ORDER, " & MyViewName & "." & FieldName & ", 0 AS COUNT "
+                strSQL = strSQL & " INTO " & TmpTable2
+                strSQL = strSQL & " FROM " & TmpTable
+                strSQL = strSQL & " LEFT JOIN " & MyViewName
+                strSQL = strSQL & " ON " & TmpTable & ".ISSUER = " & MyViewName & ".ISSUER "
+                strSQL = strSQL & " ORDER BY " & TmpTable & ".order ; "
+                dbBB.Execute strSQL
+                RowsCopied = dbBB.RecordsAffected
+                If RowsCopied = LastRow Then ' just make a recordset, and dump temp table info into spreadsheet
+                    strSQL = " SELECT "
+                    strSQL = strSQL & TmpTable2 & "." & FieldName
+                    strSQL = strSQL & " FROM " & TmpTable2
+                    strSQL = strSQL & " ORDER BY " & TmpTable2 & ".ORDER ; "
+                    Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                    CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+                    rsTemp.Close
+                    Set rsTemp = Nothing
+                Else 'go through the temp table, updating Excel spreadsheet with unique data until the end of the temp table
+                    'run the download!
+                    strSQL = " SELECT "
+                    strSQL = strSQL & TmpTable2 & ".ORDER, "
+                    strSQL = strSQL & TmpTable2 & "." & FieldName
+                    strSQL = strSQL & " FROM " & TmpTable2
+                    strSQL = strSQL & " ORDER BY " & TmpTable2 & ".ORDER ; "
+                    Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                    'CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'used only for debugging / id'ing duplicates
+                    i = 2
+                    rsTemp.MoveFirst
+                    CurOrder = 0
+                    Do While Not rsTemp.EOF
+                        If CurOrder = rsTemp.Fields("Order").Value Then 'there are multiple records with the same order number. only the first is needed!
+                             rsTemp.MoveNext
+                        Else 'there is a different Order Value!
+                            CurOrder = rsTemp.Fields("Order").Value
+                            CurrentAddr.Cells(i, 1).Value = rsTemp.Fields(FieldName).Value 'Return the values
+                            i = i + 1
+                            rsTemp.MoveNext
+                        End If
+                    Loop
+                    rsTemp.Close
+                    'Set rsTemp = Nothing
+                    strSQL = "DROP TABLE " & TmpTable2
+                    dbBB.Execute strSQL
+                End If
+            ElseIf UCase(FieldName) = "BOND_TYPE" Or UCase(FieldName) = "BOND_SUBTYPE" Then
+                strSQL = "select " & FieldName
+                strSQL = strSQL & " from " & TmpTable & " LEFT JOIN " & CusipsTable & " ON " & TmpTable & ".CUSIP = " & CusipsTable & ".CUSIP "
+                strSQL = strSQL & " Order by " & TmpTable & ".order ; "
+                Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+                rsTemp.Close
+                'Set rsTemp = Nothing
+            Else
+                'is the selected field name in the MNEUMONIC or COLUMN_NAME column of my dictionary?
+                strSQL = "select view_name, mnemonic, Column_name from " & MyTable2 & " where mnemonic  = '" & FieldName & "' or column_name = '" & FieldName & "' ; "
+                Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                RecCount = rsTemp.RecordCount
+                If RecCount = 0 Or RecCount <> 1 Then ' field name not found in dictionary.
+                    CurrentAddr.Cells(2, 1).Value = "#Field Name not found in Dictionary" 'if field name is not found, return #NA Field"
+                    rsTemp.Close
+                    'Set rsTemp = Nothing
+                Else 'here is where the macro blows up! There is no way to process the term rsTemp.Fields("VIEW_NAME").Value , as it is null,
+                     'but the fact that it is null prevents processing, for some reason.
+                     'is there a difference between an access null and an excel null?
+                    If Nz(rsTemp.Fields("VIEW_NAME").Value, "N/A") = "N/A" Then 'the NZ function allows the processing of the term rsTemp.Fields("view_name").Value which
+                                                                                ' the debugger shows "= Null" but cannot otherwise be processed
+                                                                                'Note the distinction between "= null" and "is null" << What is the difference?
+                        CurrentAddr.Cells(2, 1).Value = "#View Name NOT provided in Dictionary"
+                        rsTemp.Close
+                        'Set rsTemp = Nothing
+                    Else
+                        MyViewName = rsTemp.Fields("view_name").Value 'If found in the NAIC field name column, make no change, and grab the table name
+                        MyFieldName = rsTemp.Fields("column_name").Value
+                        rsTemp.Close
+                        'Set rsTemp = Nothing
+                        If MyViewName = "CUSIPIssuers" Then 'match on the CUSIP Issuer!
+                            strSQL = " SELECT  " & MyViewName & "." & MyFieldName
+                            strSQL = strSQL & " FROM " & TmpTable & " LEFT JOIN " & MyViewName & " ON " & TmpTable & ".ISSUER = " & MyViewName & ".ISSUER_NUMBER "
+                            strSQL = strSQL & " order by " & TmpTable & ".order ; "
+                        Else 'match on the CUSIP
+                            'Now, using the Security ID, the Table name, and the field name, get the values
+                            'SELECT SECURITY_COMMON_V_1.CUSIP, SECURITY_COMMON_V_1.BB_COMPANY_CODE, SECURITY_COMMON_V_1.DSCLSR_AGENT, SECURITY_COMMON_V_1.GUARANTEE_TYPE, SECURITY_COMMON_V_1.GUARANTOR_1_CODE
+                            'FROM TmpCUSIPS LEFT JOIN SECURITY_COMMON_V_1 ON TmpCUSIPS.CUSIP = SECURITY_COMMON_V_1.CUSIP;
+                            strSQL = " SELECT  " & MyViewName & "." & MyFieldName
+                            strSQL = strSQL & " FROM " & TmpTable & " LEFT JOIN " & MyViewName & " ON " & TmpTable & ".CUSIP = " & MyViewName & ".CUSIP "
+                            strSQL = strSQL & " order by " & TmpTable & ".order ; "
+                        End If
+                        Set rsTemp = dbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                        Application.StatusBar = "Retrieval Complete.  Copying Data for field " & MyFieldName & " from " & MyViewName & "."
+                        CurrentAddr.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+                        rsTemp.Close
+                    End If
+                End If
+            End If
+        Next i
+    Else
+        MsgBox "ACCESS DATABASE FILE CONTAINING BLOOMBERG INFORMATION NOT FOUND " & vbCrLf & vbCrLf & "Program aborting. "
+    End If
+
+    dbBB.Close
+    wrkJet.Close
+
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    Application.StatusBar = "Data Retrieval Complete.  Run Time: " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Set N = Nothing
+    Set M = Nothing
+    Set CurrentAddr = Nothing
+    Set UserWorkbook = Nothing
+    Set TargetWorkSheet = Nothing
+    Set rsTemp = Nothing
+    Set dbBB = Nothing
+    Set wrkJet = Nothing
+    Set obTimer = Nothing
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+
+Public Function DupCUSIPs(ByRef ipRng As Range, ip3Cols As Boolean) As Byte
+'wrtten 1/5/12 by cfahey
+'this reviews a range of cusips.  If there are duplicate cusips, it returns a 1, otherwise 0
+'this creates a linked list to identify duplicates
+Dim RowCnt As Long
+Dim CUSIPs() As String
+Dim LList() As Long
+Dim FirstPtr As Long
+Dim TmpPtr As Long
+Dim PrevPtr As Long
+Dim LastRow As Long
+Dim Not_Found As Boolean
+Dim i As Long
+    DupCUSIPs = 0
+    On Error GoTo ErrorHandler
+    RowCnt = ipRng.Rows.Count
+    LastRow = RowCnt + 1
+    
+    ReDim CUSIPs(RowCnt)
+    ReDim LList(RowCnt)
+    
+    'load cusips!
+    If ip3Cols Then
+        For i = 0 To RowCnt 'construct CUSIPs
+            CUSIPs(i) = ipRng(i + 1, 1) & ipRng(i + 1, 2) & ipRng(i + 1, 3)
+        Next i
+    Else
+        For i = 0 To RowCnt
+            CUSIPs(i) = ipRng(i + 1, 1)
+        Next i
+    End If
+    
+    'now do the linked list thang!
+    FirstPtr = 0
+    LList(FirstPtr) = LastRow
+    
+    For i = 1 To RowCnt
+        If CUSIPs(i) < CUSIPs(FirstPtr) Then
+            LList(i) = FirstPtr
+            FirstPtr = i
+        ElseIf CUSIPs(i) = CUSIPs(FirstPtr) Then
+            DupCUSIPs = 1
+            Exit For
+        Else ' run thru tree to find proper location!
+            TmpPtr = FirstPtr
+            PrevPtr = TmpPtr
+            Not_Found = True
+            Do
+                If CUSIPs(i) = CUSIPs(TmpPtr) Then ' a duplicate is found!
+                    DupCUSIPs = 1
+                    Exit For
+                ElseIf CUSIPs(i) < CUSIPs(TmpPtr) Then 'insert into the tree
+                    LList(i) = TmpPtr
+                    LList(PrevPtr) = i
+                    'LList(TmpPtr) = i
+                    Not_Found = False
+                ElseIf LList(TmpPtr) = LastRow Then 'insert current value as last value in tree
+                    LList(TmpPtr) = i
+                    LList(i) = LastRow
+                    Not_Found = False
+                End If
+                PrevPtr = TmpPtr
+                TmpPtr = LList(TmpPtr)
+
+            Loop While Not_Found 'And CUSIPs(i) > CUSIPs(TmpPtr) 'LList(TmpPtr) <> LastRow
+        End If
+    Next i
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+
+MyExit:
+    'Provide list of cusips in order in msgbox!
+'    Dim MsgStr As String
+'    TmpPtr = FirstPtr
+'    Do While LList(TmpPtr) <> LastRow
+'        MsgStr = MsgStr & CUSIPs(TmpPtr) & vbCrLf
+'        TmpPtr = LList(TmpPtr)
+'    Loop
+'    MsgStr = MsgStr & CUSIPs(TmpPtr)
+'    MsgBox MsgStr
+End Function
+
+Function RemoveAllSpaces(ipLine As String) As String
+Dim i As Integer
+Dim CharCnt As Integer
+    CharCnt = Len(ipLine)
+    For i = 1 To CharCnt
+        If Mid(ipLine, i, 1) <> " " Then RemoveAllSpaces = RemoveAllSpaces & Mid(ipLine, i, 1)
+    Next i
+End Function
+
+Function IDFieldInfoInRange(ipCurRng As Range, ByRef ipColSize As Integer, ByRef ipColType As String, ipRowCnt As Long) As Integer
+On Error GoTo ErrorHandler
+'Originally meant to include date values, this function just determines whether the column contains any text values, or are all numbers
+'IMPROVEMENT:  I must be able to distinguish between an integer and a real value.  Currently, the default is just integers
+'Types to provide:  TEXT, NUMBER, FLOAT, also now Decimals, to handle 100Bil values.
+Dim i As Long
+Dim UserResponse As String
+Dim MyLen As Integer
+Dim CellValFloat As Double
+Dim CellValCCY As Currency
+Dim MaxNumVal As Variant
+'Dim MaxValOffset As Long
+Dim TextFound As Boolean
+Dim FloatFound As Boolean
+
+    IDFieldInfoInRange = 0
+    ipColType = "NUMBER" 'basically, an integer number
+    For i = 0 To ipRowCnt - 1
+        MyLen = Len(CStr(ipCurRng.Value2(i + 1, 1)))
+        If MyLen > ipColSize Then ipColSize = MyLen 'read all the values, and ensure that the field length is sufficient to hold the max length
+        
+        If TextFound = False Then
+            If IsNumeric(ipCurRng.Value2(i + 1, 1)) = False Then
+                TextFound = True
+                ipColType = "TEXT"
+            Else
+                If ipCurRng.Value2(i + 1, 1) > MaxNumVal And FloatFound = False Then
+                    MaxNumVal = ipCurRng.Value2(i + 1, 1)
+                    'MaxValOffset = i + 1
+                End If
+                If IsNumeric(ipCurRng.Value2(i + 1, 1)) = True And FloatFound = False Then 'check to see if it is a floating number. Default is integer, w/ no fractional part
+                    CellValFloat = ipCurRng.Value2(i + 1, 1)
+                    CellValCCY = CCur(ipCurRng.Value2(i + 1, 1))
+                    If (Round(CellValFloat, 8) - CellValCCY) > 0 Then 'the number is a floater!
+                        FloatFound = True
+                        ipColType = "FLOAT"
+                    End If
+                End If
+            End If
+        End If
+        If i = 500 Then 'test to see if further analysis is worth it!
+            UserResponse = InputBox("500 field values have been reviewed in the current column. " & vbCrLf & _
+            "There are " & ipRowCnt - 500 & " values to still review. " & vbCrLf & _
+            "Type is currently " & ipColType & vbCrLf & _
+            "Is further review of values necessary? (0 or n = No, 1 or y = Yes", "CONTINUE REVIEW OF DATA TYPES?", 0)
+            If Len(UserResponse) = 0 _
+              Or UserResponse = 0 _
+              Or UserResponse = "0" _
+              Or UCase(UserResponse) = "NO" _
+              Or UCase(UserResponse) = "N" _
+              Or UCase(UserResponse) = "FALSE" _
+              Or UserResponse = False Then Exit For
+        End If
+    Next i
+    'if it isn't a floating value, determine whether the value will fit into an integer, a long, or a decimal
+MyNextStep:
+    If TextFound = False And FloatFound = False Then 'here is where we change the value "NUMBER" to a specific type, so long as field isn't float or text
+        If MaxNumVal < 256 Then
+            ipColType = "BYTE"
+        ElseIf MaxNumVal < 32769 Then
+            ipColType = "INTEGER"
+        ElseIf MaxNumVal < 2147483647 Then
+            ipColType = "LONG"
+        Else
+            ipColType = "DECIMAL"
+        End If
+    End If
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error! " & Err.Number & ", " & Err.Description
+    Application.StatusBar = "Error! " & Err.Number & ", " & Err.Description
+    'ipCurRng.Select
+    Err.Clear
+    IDFieldInfoInRange = -1
+MyExit:
+    'MsgBox "TYPE: " & ipColType & ", Max Length: " & ipColSize
+End Function
+
+Function TrimMyString(ByVal ipStr As String) As String
+    Do While Left(ipStr, 1) = " "
+        ipStr = Right(ipStr, Len(ipStr) - 1)
+    Loop
+    
+    Do While Right(ipStr, 1) = " "
+        ipStr = Left(ipStr, Len(ipStr) - 1)
+    Loop
+    TrimMyString = ipStr
+End Function
+
+Function SeparateFields(ipString As String, ipName As Byte) As String
+Dim i As Byte
+    i = InStr(0, "; ", ipString, 0)
+    If i = 0 Then 'string not found
+        SeparateFields = "#ERROR - DELIMITER NOT FOUND AFTER BBERG DICTIONARY LOOKUP! CONTACT SVO!"
+    ElseIf ipName = 1 Then 'return the table name!
+        SeparateFields = Mid(ipString, 1, i - 1)
+    Else 'return the fieldname!
+        SeparateFields = Mid(ipString, i + 2, Len(ipString) - (i + 1))
+    End If
+End Function
+
+Function UseBBDictionary(ipDB As DAO.Database, ByRef ipViewName As String, ByRef ipFieldName As String, ipBBDictionary As String) As String
+Dim rsTemp As DAO.Recordset
+Dim strSQL As String
+Dim RecCount As Long
+'written 2/13/12 by cfahey
+'Note that BBerg1 file contains links to all tables. Thus, the file is the same for all. What needs to be IDd is the table and proper Column name.
+'this returns the table/view name and the proper column name, with the two names separated by a "; "
+    strSQL = " SELECT view_name, mnemonic, Column_name "
+    strSQL = strSQL & " FROM " & ipBBDictionary
+    strSQL = strSQL & " WHERE mnemonic  = '" & ipFieldName & "' "
+    strSQL = strSQL & " OR column_name = '" & ipFieldName & "' ; "
+    Set rsTemp = ipDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    RecCount = rsTemp.RecordCount
+    If RecCount = 0 Or RecCount <> 1 Then ' field name not found in dictionary.
+        UseBBDictionary = "#Field Name not found in Dictionary" 'if field name is not found, return #NA Field"
+        'GoTo MyExit
+    Else 'here is where the macro blows up! There is no way to process the term rsTemp.Fields("VIEW_NAME").Value , as it is null,
+         'but the fact that it is null prevents processing, for some reason.
+         'is there a difference between an access null and an excel null?
+        If Nz(rsTemp.Fields("VIEW_NAME").Value, "N/A") = "N/A" Then 'the NZ function allows the processing of the term rsTemp.Fields("view_name").Value which
+                                                                    ' the debugger shows "= Null" but cannot otherwise be processed
+                                                                    'Note the distinction between "= null" and "is null" << What is the difference?
+            UseBBDictionary = "#View Name NOT provided in Dictionary"
+            'GoTo MyExit
+        Else
+            ipViewName = rsTemp.Fields("view_name").Value 'If found in the NAIC field name column, make no change, and grab the table name
+            ipFieldName = rsTemp.Fields("column_name").Value
+            UseBBDictionary = "0"
+            'GoTo MyExit
+        End If
+    End If
+MyExit:
+    rsTemp.Close
+    Set rsTemp = Nothing
+End Function
+
+
+
+
+

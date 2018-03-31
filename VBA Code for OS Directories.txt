@@ -1,0 +1,85 @@
+Option Explicit
+ 
+'Sub Testing1234()
+'Dim MySheet As Excel.Worksheet
+'
+'    Set MySheet = Sheets(ASS)
+'    mysheet.Tab.Color = '
+'
+'End Sub
+Sub TestListFolders()
+     
+    Application.ScreenUpdating = False
+     
+     'create a new workbook for the folder list
+     
+     'commented out by dr
+     'Workbooks.Add
+     
+     'line added by dr to clear old data
+    Cells.Delete
+     
+     ' add headers
+    With Range("A1")
+        .Formula = "Folder contents:"
+        .Font.Bold = True
+        .Font.size = 12
+    End With
+     
+    Range("A3").Formula = "Folder Path:"
+    Range("B3").Formula = "Folder Name:"
+    Range("C3").Formula = "Size:"
+    Range("D3").Formula = "Subfolders:"
+    Range("E3").Formula = "Files:"
+    Range("F3").Formula = "Short Name:"
+    Range("G3").Formula = "Short Path:"
+    Range("A3:G3").Font.Bold = True
+     
+     'ENTER START FOLDER HERE
+     ' and include subfolders (true/false)
+    ListFolders "C:\Data", True
+     
+    Application.ScreenUpdating = True
+     
+End Sub
+ 
+Sub ListFolders(SourceFolderName As String, IncludeSubfolders As Boolean)
+     ' lists information about the folders in SourceFolder
+     ' example: ListFolders "C:\data", True
+    Dim FSO As Scripting.FileSystemObject
+    Dim SourceFolder As Scripting.Folder, SubFolder As Scripting.Folder
+    Dim r As Long
+     
+    Set FSO = New Scripting.FileSystemObject
+    Set SourceFolder = FSO.GetFolder(SourceFolderName)
+     
+     'line added by dr for repeated "Permission Denied" errors
+     
+    On Error Resume Next
+     
+     ' display folder properties
+    r = Range("A65536").End(xlUp).row + 1
+    Cells(r, 1).Formula = SourceFolder.Path
+    Cells(r, 2).Formula = SourceFolder.Name
+    Cells(r, 3).Formula = SourceFolder.size
+    Cells(r, 4).Formula = SourceFolder.SubFolders.Count
+    Cells(r, 5).Formula = SourceFolder.Files.Count
+    Cells(r, 6).Formula = SourceFolder.ShortName
+    Cells(r, 7).Formula = SourceFolder.ShortPath
+    If IncludeSubfolders Then
+        For Each SubFolder In SourceFolder.SubFolders
+            ListFolders SubFolder.Path, True
+        Next SubFolder
+        Set SubFolder = Nothing
+    End If
+     
+    Columns("A:G").AutoFit
+     
+    Set SourceFolder = Nothing
+    Set FSO = Nothing
+     
+     'commented out by dr
+     'ActiveWorkbook.Saved = True
+     
+End Sub
+

@@ -1,0 +1,4038 @@
+'   This file contains all the personal macro VBA code I used and / or developed in my tenure at the NAIC.
+'   The difference exists because some fraction of this code I never used. Some I didn't develop at the NAIC 
+'   but the bulk of the code in this file was written during my time at the NAIC.  
+'   There are a TON of functions that I have since forgotten how to use. 
+'   There are also duplicates, or near duplicates, that are part of any creative process.  In short, this code 
+'   is not terribly refined or organized, and reflects the interrupt driven environment. Some of that extra 
+'   code is identified easily as it is commented out.
+'
+'   Lastly, a small fraction of this code was pulled off the internet.  It was faster to copy than create. 
+'
+' ==============================================================================================================================
+'           ACCESS MACROS MODULE
+' ==============================================================================================================================
+'To send an email from outlook once an Access module has run:
+'Load the functions below into the OUTLOOK ThisOutlookSession module.  The event will fire as soon as Outlook opens and
+'so the VBA project will load properly and the functions will be exposed.
+'Functions to go in Outlook ThisOutlookSession module:
+'Sub Application_Startup()
+'Sub FnSendMailSafe()
+'
+'Next, Test the function in the Immediate window with the text:
+'   ?ThisOutlookSession.FnSendMailSafe("youremailaddress@here.com","","","Test","Test")
+'    If this runs, then you have confirmed hte correct installation of the VBA code, and it's time for Access OLE automation:
+'Lastly, copy the functions FnTestSafeSendEmail() and FnSafeSendEmail() (below) into the Access module, and use to your heart's content.
+'
+Option Explicit
+'
+'' Code: Send E-mail without Security Warnings
+'' OUTLOOK 2003 VBA CODE FOR 'ThisOutlookSession' MODULE
+'' (c) 2005 Wayne Phillips (http://www.everythingaccess.com)
+'' Written 07/05/2005
+'' Last updated v1.4 - 26/03/2008
+''
+'' Please read the full tutorial here:
+'' http://www.everythingaccess.com/tutorials.asp?ID=112
+''
+'' Please leave the copyright notices in place - Thank you.
+'
+'Private Sub Application_Startup()
+'
+'    'IGNORE - This forces the VBA project to open and be accessible
+'    '         using automation at any point after startup
+'
+'End Sub
+'
+'' FnSendMailSafe
+'' --------------
+'' Simply sends an e-mail using Outlook/Simple MAPI.
+'' Calling this function by Automation will prevent the warnings
+'' 'A program is trying to send a mesage on your behalf...'
+'' Also features optional HTML message body and attachments by file path.
+''
+'' The To/CC/BCC/Attachments function parameters can contain multiple items
+'' by seperating them with a semicolon. (e.g. for the strTo parameter,
+'' 'test@test.com; test2@test.com' would be acceptable for sending to
+'' multiple recipients.
+''
+'Public Function FnSendMailSafe(strTo As String, _
+'                                strCC As String, _
+'                                strBCC As String, _
+'                                strSubject As String, _
+'                                strMessageBody As String, _
+'                                Optional strAttachments As String) As Boolean
+'
+'' (c) 2005 Wayne Phillips - Written 07/05/2005
+'' Last updated 26/03/2008 - Bugfix for empty recipient strings
+'' http://www.everythingaccess.com
+''
+'' You are free to use this code within your application(s)
+'' as long as the copyright notice and this message remains intact.
+'
+'On Error GoTo ErrorHandler:
+'
+'    Dim MAPISession As Outlook.Namespace
+'    Dim MAPIFolder As Outlook.MAPIFolder
+'    Dim MAPIMailItem As Outlook.MailItem
+'    Dim oRecipient As Outlook.Recipient
+'
+'    Dim TempArray() As String
+'    Dim varArrayItem As Variant
+'    Dim strEmailAddress As String
+'    Dim strAttachmentPath As String
+'
+'    Dim blnSuccessful As Boolean
+'
+'    'Get the MAPI NameSpace object
+'    Set MAPISession = Application.Session
+'
+'    If Not MAPISession Is Nothing Then
+'
+'      'Logon to the MAPI session
+'      MAPISession.Logon , , True, False
+'
+'      'Create a pointer to the Outbox folder
+'      Set MAPIFolder = MAPISession.GetDefaultFolder(olFolderOutbox)
+'      If Not MAPIFolder Is Nothing Then
+'
+'        'Create a new mail item in the "Outbox" folder
+'        Set MAPIMailItem = MAPIFolder.Items.Add(olMailItem)
+'        If Not MAPIMailItem Is Nothing Then
+'
+'          With MAPIMailItem
+'
+'            'Create the recipients TO
+'                TempArray = Split(strTo, ";")
+'                For Each varArrayItem In TempArray
+'
+'                    strEmailAddress = Trim(varArrayItem)
+'                    If Len(strEmailAddress) > 0 Then
+'                        Set oRecipient = .Recipients.Add(strEmailAddress)
+'                        oRecipient.Type = olTo
+'                        Set oRecipient = Nothing
+'                    End If
+'
+'                Next varArrayItem
+'
+'            'Create the recipients CC
+'                TempArray = Split(strCC, ";")
+'                For Each varArrayItem In TempArray
+'
+'                    strEmailAddress = Trim(varArrayItem)
+'                    If Len(strEmailAddress) > 0 Then
+'                        Set oRecipient = .Recipients.Add(strEmailAddress)
+'                        oRecipient.Type = olCC
+'                        Set oRecipient = Nothing
+'                    End If
+'
+'                Next varArrayItem
+'
+'            'Create the recipients BCC
+'                TempArray = Split(strBCC, ";")
+'                For Each varArrayItem In TempArray
+'
+'                    strEmailAddress = Trim(varArrayItem)
+'                    If Len(strEmailAddress) > 0 Then
+'                        Set oRecipient = .Recipients.Add(strEmailAddress)
+'                        oRecipient.Type = olBCC
+'                        Set oRecipient = Nothing
+'                    End If
+'
+'                Next varArrayItem
+'
+'            'Set the message SUBJECT
+'                .Subject = strSubject
+'
+'            'Set the message BODY (HTML or plain text)
+'                If StrComp(Left(strMessageBody, 6), "<HTML>", _
+'                            vbTextCompare) = 0 Then
+'                    .HTMLBody = strMessageBody
+'                Else
+'                    .Body = strMessageBody
+'                End If
+'
+'            'Add any specified attachments
+'                TempArray = Split(strAttachments, ";")
+'                For Each varArrayItem In TempArray
+'
+'                    strAttachmentPath = Trim(varArrayItem)
+'                    If Len(strAttachmentPath) > 0 Then
+'                        .Attachments.Add strAttachmentPath
+'                    End If
+'
+'                Next varArrayItem
+'
+'            .Send 'The message will remain in the outbox if this fails
+'
+'            Set MAPIMailItem = Nothing
+'
+'          End With
+'
+'        End If
+'
+'        Set MAPIFolder = Nothing
+'
+'      End If
+'
+'      MAPISession.Logoff
+'
+'    End If
+'
+'    'If we got to here, then we shall assume everything went ok.
+'    blnSuccessful = True
+'
+'ExitRoutine:
+'    Set MAPISession = Nothing
+'    FnSendMailSafe = blnSuccessful
+'
+'    Exit Function
+'
+'ErrorHandler:
+'    MsgBox "An error has occured in the user defined Outlook VBA function " & _
+'            "FnSendMailSafe()" & vbCrLf & vbCrLf & _
+'            "Error Number: " & CStr(Err.Number) & vbCrLf & _
+'            "Error Description: " & Err.Description, _
+'                vbApplicationModal + vbCritical
+'    Resume ExitRoutine
+'
+'End Function
+'TO USE, MOVE THE FUNCTIONS BELOW INTO AN ACCESS MODULE
+''?ThisOutlookSession.FnSendMailSafe("youremailaddress@here.com","","","Test","Test")
+'
+''Option Explicit
+'
+'' ACCESS VBA MODULE: Send E-mail without Security Warning
+'' (c) 2005 Wayne Phillips (http://www.everythingaccess.com)
+'' Written 07/05/2005
+'' Last updated v1.3 - 11/11/2005
+''
+'' Please read the full tutorial & code here:
+'' http://www.everythingaccess.com/tutorials.asp?ID=112
+''
+'' Please leave the copyright notices in place - Thank you.
+'
+'' This is a test function! - replace the e-mail addresses
+'' with your own before executing!!
+'' (CC/BCC can be blank strings, attachments string is optional)
+'
+'Sub FnTestSafeSendEmail()
+'    Dim blnSuccessful As Boolean
+'    Dim strHTML As String
+'
+'    strHTML = "<html>" & _
+'               "<body>" & _
+'               "My <b><i>HTML</i></b> message text!" & _
+'               "</body>" & _
+'               "</html>"
+'    blnSuccessful = FnSafeSendEmail("myemailaddress@domain.com", _
+'                                    "My Message Subject", _
+'                                    strHTML)
+'
+'    'A more complex example...
+'    'blnSuccessful = FnSafeSendEmail( _
+'                        "myemailaddress@domain.com; recipient2@domain.com", _
+'                        "My Message Subject", _
+'                        strHTML, _
+'                        "C:\MyAttachFile1.txt; C:\MyAttachFile2.txt", _
+'                        "cc_recipient@domain.com", _
+'                        "bcc_recipient@domain.com")
+'
+'    If blnSuccessful Then
+'
+'        MsgBox "E-mail message sent successfully!"
+'
+'    Else
+'
+'        MsgBox "Failed to send e-mail!"
+'
+'    End If
+'
+'End Sub
+'
+'
+''This is the procedure that calls the exposed Outlook VBA function...
+'Public Function FnSafeSendEmail(strTo As String, _
+'                    strSubject As String, _
+'                    strMessageBody As String, _
+'                    Optional strAttachmentPaths As String, _
+'                    Optional strCC As String, _
+'                    Optional strBCC As String) As Boolean
+'
+'    Dim objOutlook As Object ' Note: Must be late-binding.
+'    Dim objNameSpace As Object
+'    Dim objExplorer As Object
+'    Dim blnSuccessful As Boolean
+'    Dim blnNewInstance As Boolean
+'
+'    'Is an instance of Outlook already open that we can bind to?
+'    On Error Resume Next
+'    Set objOutlook = GetObject(, "Outlook.Application")
+'    On Error GoTo 0
+'
+'    If objOutlook Is Nothing Then
+'
+'        'Outlook isn't already running - create a new instance...
+'        Set objOutlook = CreateObject("Outlook.Application")
+'        blnNewInstance = True
+'        'We need to instantiate the Visual Basic environment... (messy)
+'        Set objNameSpace = objOutlook.GetNamespace("MAPI")
+'        Set objExplorer = objOutlook.Explorers.Add(objNameSpace.Folders(1), 0)
+'        objExplorer.CommandBars.FindControl(, 1695).Execute
+'
+'        objExplorer.Close
+'
+'        Set objNameSpace = Nothing
+'        Set objExplorer = Nothing
+'
+'    End If
+'
+'    blnSuccessful = objOutlook.FnSendMailSafe(strTo, strCC, strBCC, _
+'                                                strSubject, strMessageBody, _
+'                                                strAttachmentPaths)
+'
+'    If blnNewInstance = True Then objOutlook.Quit
+'    Set objOutlook = Nothing
+'
+'    FnSafeSendEmail = blnSuccessful
+'
+'End Function
+
+' ==============================================================================================================================
+'           CMD BUTTONS
+' ==============================================================================================================================
+Option Explicit
+Const RowCntLoc = "B1"  'enter either a number or an address.  If number, include header line.  If an address, change requisite lines below
+Const ColCntLoc = "B2"
+Const CriteriaCntLoc = "B3"
+Const RowsExtrCnt = "B4"
+Const InitHdr = "BA5"
+Const InitCrit = "A7"
+Const InitExtr = "A16"
+Const InitSortSpecs = "A15"
+'Const DenominationLoc = "C1"
+'Const FilterDenomLoc = "L15"
+Const MyBlue = &HFFFFC0
+Const MyOrange = &HC0E0FF
+'Const MyOrange = &HC0E0FF
+'Const MyBlue = &HFFFFC0
+'const MyGreen = &H00C0FFC0&
+'const MyRed = &H00C0C0FF&
+'const MyYellow = &H0000FFFF&
+'const MyCyan = &H00FF80FF&
+
+Private Sub CommandButton2_Click()
+On Error GoTo ErrorHandler
+'sort function
+Dim CurAddr As String
+Dim ExtractRng As Range
+Dim SortSpecs As Range
+Dim ColCnt As Integer
+Dim RowCnt As Long
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.StatusBar = ""
+    
+    CurAddr = Selection.Address
+    
+'    commandbutton2.Caption = "SORT"
+'    commandbutton2.Font = "Times New Roman"
+'    commandbutton2.Font.bold = true
+'    commandbutton2.FontSize = 11
+'    commandbutton2.BackColor = MyOrange
+    
+    ColCnt = Range(ColCntLoc).Value
+    RowCnt = Range(RowsExtrCnt).Value
+    Set SortSpecs = Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1))
+    SortSpecs.Select
+    Set ExtractRng = Range(InitExtr, Range(InitExtr).Offset(RowCnt, ColCnt - 1))
+    ExtractRng.Select
+    SortMyRange SortSpecs, ExtractRng ') ', curaddripExitLoc As Range)
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+    
+MyExit:
+    Set ExtractRng = Nothing
+    Set SortSpecs = Nothing
+    Range(CurAddr).Select
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+Private Sub CommandButton1_Click()
+On Error GoTo ErrorHandler
+'Filter function
+Dim CriteriaRng As Range
+Dim ExtractRng As Range
+Dim DataRng As Range
+Dim obTimer As New CHighResTimer
+Dim MyTime As Double
+Dim CurAddr As String
+Dim ColCnt As Byte
+Dim CriteriaCnt As Byte
+Dim DataCnt As Long
+Const DumpUnique = True
+'Const DenominationLoc = "C1"
+'Const FilterDenomLoc = "L15"
+    obTimer.StartTimer
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.StatusBar = ""
+
+    CurAddr = Selection.Address
+'    commandbutton1.Caption = "FILTER"
+'    commandbutton1.Font = "Times New Roman"
+'    commandbutton1.Font.bold = true
+'    commandbutton1.FontSize = 11
+'    commandbutton1.BackColor = MyBlue
+    '*************************************
+    DataCnt = Range(RowCntLoc).Value
+    ColCnt = Range(ColCntLoc).Value
+    CriteriaCnt = Range(CriteriaCntLoc).Value
+    '********************************
+    If CriteriaCnt > 6 Then 'the way the spreadsheet is set up, there are too many criteria rows
+        MsgBox "Too many criteria lines.  Please restructure spreadsheet, and adjust the macro!"
+        Return
+    End If
+
+    If DataCnt = 1 Then
+        MsgBox "Can't run this macro without valid data!"
+    Else
+        'Now define the Data Range, the Criteria Range, and the Extract Range
+        Set DataRng = Range(InitHdr, Range(InitHdr).Offset(DataCnt - 1, ColCnt - 1))
+        'DataRng.Select
+        Set CriteriaRng = Range(InitCrit, Range(InitCrit).Offset(CriteriaCnt, ColCnt - 1))
+        'CriteriaRng.Select
+        Set ExtractRng = Range(InitExtr, Range(InitExtr).Offset(0, ColCnt - 1))
+        'ExtractRng.Select
+        'Either one of the following lines works!!!
+        DataRng.AdvancedFilter xlFilterCopy, CriteriaRng, ExtractRng, False
+        'DataRng.AdvancedFilter Action:=xlFilterCopy, criteriarange:=CriteriaRng, copytorange:=ExtractRng, unique:=dumpunique
+    End If
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    Application.StatusBar = "Filter process completed in " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error!  Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Set DataRng = Nothing
+    Set CriteriaRng = Nothing
+    Set ExtractRng = Nothing
+    Range(CurAddr).Select
+    'Range(FilterDenomLoc).Value = Range(DenominationLoc).Value
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Set obTimer = Nothing
+    
+End Sub
+
+Private Sub CommandButton3_Click()
+'clear function
+Dim ColCnt As Integer
+    ColCnt = Range(ColCntLoc).Value
+    Application.StatusBar = ""
+    'Range(Range(InitCrit).Offset(1, 0), Range(InitCrit).Offset(6, ColCnt - 1)).Select 'clear criteria info
+    Range(Range(InitCrit).Offset(1, 0), Range(InitCrit).Offset(6, ColCnt - 1)).ClearContents 'clear criteria info
+    'Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1)).Select                              'clear sort parms
+    Range(Range(InitSortSpecs), Range(InitSortSpecs).Offset(0, ColCnt - 1)).ClearContents                              'clear sort parms
+End Sub
+
+Sub SortMyRange(ByRef ipSortSpecs As Range, ByRef ipSortData As Range, Optional ByRef ipExitLoc As Range)
+'Written on 12/22/11/ by cfahey
+'this attempts to streamline / standardize the sort function across the various spreadsheets
+'requires function DUPLICATESINSORT
+Dim MyFld1 As String
+Dim MyFld2 As String
+Dim MyFld3 As String
+Dim PrimeOffset As Integer
+Dim ColumnsCntr As Byte
+Dim SortSpecSum As Integer
+Dim RowsCntr As Long
+Dim MyOrder1 As Byte
+Dim MyOrder2 As Byte
+Dim MyOrder3 As Byte
+Dim i As Byte
+Dim FieldCount As Byte
+Dim test1 As String
+Const SrtAscending = 1
+Const SrtDescending = 2
+
+    ColumnsCntr = ipSortData.Columns.Count 'Range(NumOfCols).Value
+    RowsCntr = ipSortData.Rows.Count ' Range(SortRows).Value
+
+    ' Too many parameters? send err msg
+    ipSortSpecs.Select
+    FieldCount = Application.WorksheetFunction.Count(ipSortSpecs)
+    If FieldCount > 3 Then ' too many fields specified
+        MsgBox "Too many sort fields are specified (3 max). Please correct and restart."
+        GoTo MyExit
+    ElseIf FieldCount = 0 Then
+        MsgBox "No sort fields defined."
+        GoTo MyExit
+    End If
+    'check that there aren't two primary fields specified, etc.
+    SortSpecSum = DuplicatesInSort(ipSortSpecs)
+    If SortSpecSum = -1 Then
+        ' a message was already delivered
+    ElseIf SortSpecSum <> 0 Then ' a return of 0 means that everything appears to be ok
+        MsgBox "There are duplicate sort fields in your sort." & vbCrLf & "Please specify only one 1 (or -1) field, one 2/-2, and one 3/-3, then restart."
+    Else 'now that all the error checking has been done, proceed with the sort!
+        If FieldCount < 3 Then MyFld3 = ipSortData.Cells(1, 1).Value  'default to first column if only 2 fields are specified
+        If FieldCount < 2 Then MyFld2 = ipSortData.Cells(1, 1).Value 'default to first column if only 1 field is specified
+        MyOrder2 = SrtAscending
+        MyOrder3 = SrtAscending
+        For i = 1 To ColumnsCntr
+            Select Case ipSortSpecs.Cells(1, i).Value
+                Case 0 'do nothing!
+                Case 1
+                     MyFld1 = ipSortData.Cells(1, i).Value
+                    MyOrder1 = SrtAscending
+                    PrimeOffset = i
+                Case -1
+                    MyFld1 = ipSortData.Cells(1, i).Value
+                    MyOrder1 = SrtDescending
+                    PrimeOffset = i
+                Case 2
+                    MyFld2 = ipSortData.Cells(1, i).Value
+                    MyOrder2 = SrtAscending
+                Case -2
+                    MyFld2 = ipSortData.Cells(1, i).Value
+                    MyOrder2 = SrtDescending
+                Case 3
+                    MyFld3 = ipSortData.Cells(1, i).Value
+                    MyOrder3 = SrtAscending
+                Case -3
+                    MyFld3 = ipSortData.Cells(1, i).Value
+                    MyOrder3 = SrtDescending
+                Case Else 'do nothing!
+            End Select
+        Next i
+        'ipSortData.Select
+        ipSortData.Sort Key1:=MyFld1, Order1:=MyOrder1, Key2:=MyFld2, _
+                Order2:=MyOrder2, Key3:=MyFld3, Order3:=MyOrder3, Header:= _
+                xlYes, OrderCustom:=1, MatchCase:=False, Orientation:=xlTopToBottom, _
+                DataOption1:=xlSortNormal, DataOption2:=xlSortNormal, DataOption3:= _
+                xlSortNormal
+        If ipExitLoc Is Nothing Then
+            ipSortData.Cells(1, PrimeOffset).Select
+'            MyFld1.Offset(4, 0).Select
+        Else 'select the appropriate cell to end on
+            ipExitLoc.Select
+        End If
+    End If
+MyExit:
+End Sub
+Function DuplicatesInSort(ipSortSpecs As Range) As Integer
+'written 12/22/11 by cfahey
+'This function checks that there aren't two primary, secondary, or teritary fields specified
+Dim SortSum As Integer
+Dim ColValue As Variant
+Dim i As Long
+    For i = 1 To ipSortSpecs.Columns.Count
+        ColValue = Abs(ipSortSpecs.Cells(1, i).Value)
+        If ColValue <> 0 And ColValue <> 1 And ColValue <> 2 And ColValue <> 3 Then 'invalid value!!!
+            DuplicatesInSort = -1
+            MsgBox "Invalid Sort Value at Address " & ipSortSpecs.Cells(1, i).Address
+            GoTo MyExit
+        ElseIf ColValue = 3 Then
+            SortSum = SortSum + 4
+        Else
+            SortSum = SortSum + ColValue
+        End If
+    Next i
+    If SortSum = 1 Or SortSum = 3 Or SortSum = 7 Then
+        DuplicatesInSort = 0
+    Else
+        DuplicatesInSort = SortSum
+    End If
+MyExit:
+End Function
+Private Sub CommandButton4_Click()
+'written 7/10/13 by cfahey
+'this just cycles the BACV column between ones, thousands, millions, and billions, and back to ones
+Dim i As Integer
+Dim CurVal As Variant
+Dim MaxRows As Long
+Dim SampleVals(3) As Single
+Dim MaxDenom As String
+Dim ExistingDenom As String
+Dim CurAddr As String
+Dim CheckCnt As Integer
+Const TrialSize = 5
+Const DenominationLoc = "C1"
+Const BilDen = "($Bil's)"
+Const MilDen = "($mil's)"
+Const ThouDen = "($000's)"
+Const OneDen = "($'s)"
+Const ColOffsetVal = 2
+Const IntegerLimit = 0.009
+
+    'ReDim SampleVals(TrialSize, 2)
+    'CommandButton4.Caption = "Change Denomination"
+    'check to see what the denomination is!
+    CurAddr = Selection.Address
+    
+    MaxRows = Range(RowCntLoc).Value
+    If MaxRows < TrialSize Then CheckCnt = MaxRows Else CheckCnt = TrialSize
+    For i = 1 To CheckCnt
+        CurVal = Range(InitHdr).Offset(i, ColOffsetVal).Value2 'change the 3 to 2 when finished testing
+        
+        SampleVals(0) = CurVal - Int(CurVal)
+        SampleVals(1) = CurVal * 10 - Int(CurVal * 10)
+        SampleVals(2) = CurVal * 10000 - Int(CurVal * 10000)
+        SampleVals(3) = CurVal * 10000000 - Int(CurVal * 10000000)
+        
+        If SampleVals(3) > IntegerLimit Then
+            MaxDenom = BilDen
+        ElseIf SampleVals(2) > IntegerLimit And SampleVals(3) < IntegerLimit And MaxDenom <> BilDen Then
+            MaxDenom = MilDen
+        ElseIf SampleVals(1) > IntegerLimit And SampleVals(2) < IntegerLimit And SampleVals(3) < IntegerLimit And MaxDenom <> BilDen And MaxDenom <> MilDen Then
+            MaxDenom = ThouDen
+        ElseIf SampleVals(0) > IntegerLimit And SampleVals(1) < IntegerLimit And SampleVals(2) < IntegerLimit And SampleVals(3) < IntegerLimit And MaxDenom <> BilDen And MaxDenom <> MilDen Then
+            MaxDenom = OneDen
+        ElseIf MaxDenom <> BilDen And MaxDenom <> MilDen And MaxDenom <> ThouDen Then
+           MaxDenom = OneDen
+        End If
+'        MsgBox CurVal & ", " & SampleVals(0) & ", " & SampleVals(1) & ", " & SampleVals(2) & ", " & SampleVals(3) & "  >>> " & MaxDenom
+    Next i
+        
+    If MaxDenom = BilDen Then 'change billions to one's
+        Range(DenominationLoc).Value = 1000000000
+        Range(DenominationLoc).Copy
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).Select '
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).PasteSpecial xlPasteValues, xlPasteSpecialOperationMultiply
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).NumberFormat = "$#,##0"
+        
+        Range(DenominationLoc).Value = OneDen
+    Else
+        Range(DenominationLoc).Value = 1000
+        Range(DenominationLoc).Copy
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).Select
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).PasteSpecial xlPasteValues, xlPasteSpecialOperationDivide
+        Range(Range(InitHdr).Offset(1, ColOffsetVal), Range(InitHdr).Offset(MaxRows, ColOffsetVal)).NumberFormat = "$#,##0.0"
+        
+        If MaxDenom = MilDen Then 'divide by 1000 to change to billions
+            Range(DenominationLoc).Value = BilDen
+        ElseIf MaxDenom = ThouDen Then 'divide by 1000 to change to millions
+            Range(DenominationLoc).Value = MilDen
+        ElseIf MaxDenom = OneDen Then 'divide by 1000 and change to thousands
+            Range(DenominationLoc).Value = ThouDen
+        Else 'change the bill value to ones
+            Range(DenominationLoc).Value = OneDen
+        End If
+    End If
+    
+MyExit:
+    Range(CurAddr).Select
+End Sub
+
+'Sub CommandButton9_Click()
+''written 1/8/14 by cfahey
+'On Error GoTo ErrorHandler
+''Dim ThisWB As Excel.Workbook
+'Dim N As Object
+'Dim MySheet As Excel.Worksheet
+'Dim NewSheet As Excel.Worksheet
+''Dim ToDelete As Excel.Worksheets
+'Dim SheetNms(11) As String
+'Dim TestStr As String
+'Dim i As Integer
+'Dim DisplayStatus As Boolean
+'Dim UserResponse As Integer
+'Const DataRangeToDelete = "A5:AD142"
+'    'Check to be sure that this is what the user wants to do
+'    UserResponse = MsgBox("Note!" & vbCrLf & vbCrLf & "This action will wipe out existing worksheets, " & vbCrLf & _
+'    "and require another download from I-SITE to repopulate the sheets with data. " & vbCrLf & vbCrLf & _
+'    "Is this truly what you want to do?", vbYesNo, "DESTROY EXISTING DATA??")
+'
+'    If UserResponse = 7 Then GoTo MyExit '6 = yes, 7 = no
+'
+'    DisplayStatus = Application.DisplayAlerts
+'    Set MySheet = ActiveSheet
+'    CommandButton9.Visible = False
+'    SheetNms(0) = "BTypesByInd"
+'    SheetNms(1) = "BTypesByInd-10M"
+'    SheetNms(2) = "BTypesByInd-100M"
+'    SheetNms(3) = "BTypesByInd-250M"
+'    SheetNms(4) = "BTypesByInd-500M"
+'    SheetNms(5) = "BTypesByInd-750M"
+'    SheetNms(6) = "BTypesByInd-1-0B"
+'    SheetNms(7) = "BTypesByInd-2-5B"
+'    SheetNms(8) = "BTypesByInd-5-0B"
+'    SheetNms(9) = "BTypesByInd-10B"
+'    SheetNms(10) = "BTypesByInd-25B"
+'    SheetNms(11) = "BTypesByInd-25Bplus"
+'
+'    'remove prior/existing sheets
+'    Application.DisplayAlerts = False
+'    For i = 1 To 11
+'        For Each N In Excel.Sheets 'i = 1 To 11
+'            TestStr = N.Name
+'            If N.Name = SheetNms(i) Then
+'                'ToDelete.Add N
+'                N.Delete
+'                'Sheets(SheetNms(i)).Delete
+'                Exit For
+'            End If
+'        Next N
+'    Next i
+'
+'    Application.DisplayAlerts = True 'DisplayStatus
+'
+'    'now create new copies of sheetnms(0), and rename each sheet
+'    For i = 10 To 0 Step -1
+'        Sheets(SheetNms(0)).Select
+'        Sheets(SheetNms(0)).Copy Before:=Sheets(SheetNms(0))
+'        Set NewSheet = ActiveSheet
+'        NewSheet.Name = SheetNms(i + 1)
+'        'now wipe out the existing data area, in anticipation of a new download
+'        'NewSheet.Range(DataRangeToDelete).Select
+'        NewSheet.Range(DataRangeToDelete).ClearContents
+'    Next i
+'
+'    Sheets(SheetNms(0)).Select
+'    Sheets(SheetNms(0)).CommandButton9.Visible = True
+'    GoTo MyExit
+'
+'ErrorHandler:
+'    MsgBox "Error #" & Err.Number & ", " & Err.Description
+'    Err.Clear
+'
+'MyExit:
+'    'set thiswb = nothing
+'    Set NewSheet = Nothing
+'    Set MySheet = Nothing
+'    Set N = Nothing
+'End Sub
+
+
+' ==============================================================================================================================
+'           CMD BUTTONS 4 BBERG 
+' ==============================================================================================================================
+Option Explicit
+'remember
+'Private Sub CommandButton1_Click()
+''this loads a list of cusips into the local Access table
+'Dim CUSIPRange As Range
+'Dim Across3Cols As Boolean
+'Const MYGREEN = &HC0FFC0
+'Const MYYELLOW = &H80FFFF
+'
+'    On Error GoTo ErrorHandler
+'
+'    'because new cusips will be loaded, remove the ability to pull down bloomberg data in other sheets!
+'    CommandButton2.Visible = False
+'
+'    CommandButton1.BackColor = MYYELLOW
+'
+'    'is there an array of cusips, or just one?
+'    If TypeName(ActiveSheet) <> "Worksheet" Or TypeName(Selection) <> "Range" Then 'confirm that what has been selected is a worksheet and not a chart or other object
+'        MsgBox "Please select a range of CUSIPs first"
+'        Exit Sub
+'    Else
+'        Set CUSIPRange = Selection
+'    End If
+'    If CUSIPRange.Columns.Count = 3 Then
+'        Across3Cols = True
+'    Else
+'        Across3Cols = False
+'    End If
+'
+'    SaveCUSIPS CUSIPRange, Across3Cols
+'
+'    GoTo MyExit
+'ErrorHandler:
+'    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+'    Err.Clear
+'
+'MyExit:
+'    Set CUSIPRange = Nothing
+'    CommandButton1.BackColor = MYGREEN
+'    CommandButton2.Visible = True
+'    Application.StatusBar = "Loading of CUSIP codes complete."
+'End Sub
+'
+'Private Sub CommandButton2_Click()
+''this returns the Bloomberg Data
+'
+'Dim wrkJet As DAO.Workspace
+'Dim dbBB As DAO.Database
+'Dim rsTemp As DAO.Recordset
+'
+'Dim CurrentAddr As Range
+'Dim Fieldname As String
+'Dim MyViewName As String
+'Dim ColCount As Integer
+'Dim i As Integer
+'Dim Sheet4BB As String
+'Dim CurRowCount As Long
+'Dim ReturnedCount As Long
+''Dim MyTime As Double
+''Dim obTimer As New CHighResTimer
+'
+'Const TmpTable = "TmpCUSIPs"
+'Const TmpFile1 = "C:\ProgramData\zBBergData1.mdb"
+'
+'Const MyPink = &HC0C0FF
+'Const MYYELLOW = &HC0FFFF    '&H00C0FFFF&
+'
+'    On Error GoTo ErrorHandler
+''    obTimer.StartTimer
+'
+'    CommandButton2.BackColor = MYYELLOW
+'
+'    ColCount = Selection.Columns.Count
+'
+'    If Selection.Rows.Count > 1 Then 'there should only be 1 cell specified!
+'        MsgBox "Please specify only 1 row for bloomberg data retrieval function."
+'    End If
+'
+'    Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+'    Set dbBB = wrkJet.OpenDatabase(TmpFile1)
+'    Set rsTemp = dbBB.OpenRecordset(TmpTable, dbOpenDynaset, dbReadOnly)
+'
+'    rsTemp.MoveLast
+'    CurRowCount = rsTemp.RecordCount
+'    rsTemp.Close
+'    Set rsTemp = Nothing
+'
+'    Sheet4BB = ActiveSheet.Name
+'
+'    For i = 1 To ColCount
+'        Fieldname = Selection.Cells(1, i).Value
+'        Set CurrentAddr = Selection.Cells(1, i)
+'        Application.StatusBar = "Retrieving Information for " & Fieldname
+'
+'        ReturnedCount = ReturnData(dbBB, Fieldname, CurrentAddr)
+'    Next i
+'    'rsTemp.Close
+'    dbBB.Close
+'    wrkJet.Close
+'
+'    GoTo MyExit
+'
+'ErrorHandler:
+'    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+'    Err.Clear
+'MyExit:
+'    Set CurrentAddr = Nothing
+'    Set dbBB = Nothing
+'    Set wrkJet = Nothing
+''    obTimer.StopTimer
+''    MyTime = obTimer.Elapsed
+''    Set obTimer = Nothing
+'    CommandButton2.BackColor = MyPink
+'    Application.StatusBar = "Data Retrieval Complete.  " 'Run Time: " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+'End Sub
+'Sub SaveCUSIPS(ByRef ipCUSIPRange As Range, ipAcross3Cols As Boolean)
+'Dim wrkJet As Workspace
+'Dim rsTemp As Recordset
+'Dim dbBB As Database
+'Dim tdfTargetTable As TableDef
+'Dim idxRowOffset As Index
+'Dim N As Object
+''Dim CUSIPRange As Range
+'Dim CurrentCUSIP As String
+''Dim RangeAddr As String
+'Dim RecCount As Long
+'Dim i As Long
+'Dim Across3Cols As Boolean
+'Dim strSQL As String
+'Const TmpFile = "C:\ProgramData\zBBergData1.mdb"
+'Const TmpTable = "TmpCUSIPS"
+'
+'    On Error GoTo ErrorHandler
+'
+'    Set wrkJet = CreateWorkspace("", "admin", "", dbUseJet)
+'    Set dbBB = wrkJet.OpenDatabase(TmpFile)
+'    'RangeAddr = ipCUSIPRange.Address
+'    'does the table already exist? If so, delete it now
+'    For Each N In dbBB.TableDefs
+'        If N.Name = TmpTable Then
+'            strSQL = "drop table " & TmpTable
+'            dbBB.Execute (strSQL)
+'            Exit For
+'        End If
+'    Next N
+'    Application.StatusBar = "Making Temporary Table"
+'    'now create the table
+'    Set tdfTargetTable = dbBB.CreateTableDef(TmpTable)
+'    'create the table, with fields
+'    With tdfTargetTable
+'        .Fields.Append .CreateField("Order", dbLong)
+'        .Fields.Append .CreateField("CUSIP", dbText, 9)
+'        .Fields.Append .CreateField("Issuer", dbText, 6)
+'        'add an index, so cusips are arranged properly all the time
+'        Set idxRowOffset = .CreateIndex("RowNum")
+'        With idxRowOffset
+'            .Fields.Append .CreateField("Order", dbLong)
+'        End With
+'        .Indexes.Append idxRowOffset
+'        .Indexes.Refresh
+'    End With
+'    dbBB.TableDefs.Append tdfTargetTable
+'    dbBB.TableDefs.Refresh
+'
+'    Application.StatusBar = "Temporary Table Made. Loading CUSIPs . . ."
+'
+'    Set rsTemp = dbBB.OpenRecordset(TmpTable, dbOpenTable)
+'    'load cusips into the temporary table, checking to be sure that they are 9 characters long
+'    RecCount = ipCUSIPRange.Rows.Count
+''    ReDim MyCUSIPs(RecCount)
+'    For i = 1 To RecCount
+'        If ipAcross3Cols Then
+'            CurrentCUSIP = CStr(ipCUSIPRange.Cells(i, 1).Value & ipCUSIPRange.Cells(i, 2).Value & ipCUSIPRange.Cells(i, 3).Value)
+'        Else
+'            CurrentCUSIP = CStr(ipCUSIPRange.Cells(i, 1).Value)
+'        End If
+'        If Len(CurrentCUSIP) <> 9 Then
+'            Do
+'                CurrentCUSIP = "0" & CurrentCUSIP 'just add leading zeros
+'            Loop Until Len(CurrentCUSIP) = 9
+'        End If
+'        With rsTemp
+'            .AddNew
+'            .Fields("Order").Value = i
+'            .Fields("CUSIP").Value = CurrentCUSIP
+'            .Fields("ISSUER").Value = Left(CurrentCUSIP, 6)
+'            .Update
+'        End With
+'    Next i
+'    Application.StatusBar = "Transfer Complete. " & RecCount & " CUSIPs Loaded"
+'    GoTo MyExit
+'ErrorHandler:
+'    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+'    Err.Clear
+'
+'MyExit:
+'    rsTemp.Close
+'    Set rsTemp = Nothing
+'    Set N = Nothing
+'    Set tdfTargetTable = Nothing
+'    dbBB.Close
+'    wrkJet.Close
+'    Set dbBB = Nothing
+'    Set wrkJet = Nothing
+'End Sub
+'Function ReturnData(ByRef ipdbBB As DAO.Database, ipFieldName As String, ipOutputLoc As Range) As Long
+'Dim rsTemp As DAO.Recordset
+'Dim MyViewName As String
+'Dim MyFieldName As String
+'Dim RecCount As Long
+'Dim strSQL As String
+'Const TmpTable = "TmpCUSIPS"
+'Const CusipsTable = "KnownCUSIPS"
+'Const MyTable2 = "DICTIONARY" 'data dictionary
+'
+'    On Error GoTo ErrorHandler
+'
+'    If UCase(ipFieldName) = "BOND_TYPEI" Or UCase(ipFieldName) = "BOND_SUBTYPEI" Then 'look up types based on issuer
+'         ipOutputLoc.Cells(2, 1).Value = "#FEATURE CURRENTLY BEING DEVELOPED!"
+'         'the problem with returning by issuer was that more than one row was returned for a given issuer, creating mis-match issues.
+'         'possible solution is to create an array in local memory, copy the recordset to the local variable, and copy (the first or most popular value)
+'         'to the spreadsheet one row at a time, thus excluding the duplicates.
+'         ReturnData = 0
+''        ipFieldName = Left(ipFieldName, Len(ipFieldName) - 1)
+''        strSQL = "select " & ipFieldName & " from " & TmpTable & " LEFT JOIN " & CUSIPSTable & " ON " & TmpTable & ".ISSUER = " & CUSIPSTable & ".ISSUER; "
+''        Set RsTemp = ipdbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+''        ipOutputLoc.Cells(2, 1).CopyFromRecordset RsTemp  'Return the values
+''        Set RsTemp = Nothing
+'    ElseIf UCase(ipFieldName) = "BOND_TYPE" Or UCase(ipFieldName) = "BOND_SUBTYPE" Then
+'        strSQL = "select " & ipFieldName
+'        strSQL = strSQL & " from " & TmpTable & " LEFT JOIN " & CusipsTable & " ON " & TmpTable & ".CUSIP = " & CusipsTable & ".CUSIP "
+'        strSQL = strSQL & " Order by " & TmpTable & ".order ; "
+'        Set rsTemp = ipdbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+'        ipOutputLoc.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+'        Set rsTemp = Nothing
+'        ReturnData = 0
+'    Else
+'        'is the selected field name in the MNEUMONIC or COLUMN_NAME column of my dictionary?
+'        strSQL = "select view_name, mnemonic, Column_name from " & MyTable2 & " where mnemonic  = '" & ipFieldName & "' or column_name = '" & ipFieldName & "' ; "
+'        Set rsTemp = ipdbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+'        RecCount = rsTemp.RecordCount
+'        If RecCount = 0 Or RecCount <> 1 Then ' field name not found in dictionary.
+'            ipOutputLoc.Cells(2, 1).Value = "#Field Name not found in Dictionary" 'if field name is not found, return #NA Field"
+'            Set rsTemp = Nothing
+'            ReturnData = 0
+'        Else 'here is where the macro blows up! There is no way to process the term rsTemp.Fields("VIEW_NAME").Value , as it is null,
+'             'but the fact that it is null prevents processing, for some reason.
+'             'is there a difference between an access null and an excel null?
+'            If Nz(rsTemp.Fields("VIEW_NAME").Value, "N/A") = "N/A" Then 'the NZ function allows the processing of the term rsTemp.Fields("view_name").Value which
+'                                                                        ' the debugger shows "= Null" but cannot otherwise be processed
+'                                                                        'Note the distinction between "= null" and "is null" << What is the difference?
+'                ipOutputLoc.Cells(2, 1).Value = "#View Name NOT provided in Dictionary"
+'                Set rsTemp = Nothing
+'                ReturnData = 0
+'            Else
+'                MyViewName = rsTemp.Fields("view_name").Value 'If found in the NAIC field name column, make no change, and grab the table name
+'                MyFieldName = rsTemp.Fields("column_name").Value
+'                Set rsTemp = Nothing
+'                ReturnData = 0
+'                'Now, using the Security ID, the Table name, and the field name, get the values
+'                'SELECT SECURITY_COMMON_V_1.CUSIP, SECURITY_COMMON_V_1.BB_COMPANY_CODE, SECURITY_COMMON_V_1.DSCLSR_AGENT, SECURITY_COMMON_V_1.GUARANTEE_TYPE, SECURITY_COMMON_V_1.GUARANTOR_1_CODE
+'                'FROM TmpCUSIPS LEFT JOIN SECURITY_COMMON_V_1 ON TmpCUSIPS.CUSIP = SECURITY_COMMON_V_1.CUSIP;
+'                strSQL = " SELECT  " & MyViewName & "." & MyFieldName
+'                strSQL = strSQL & " FROM " & TmpTable & " LEFT JOIN " & MyViewName & " ON " & TmpTable & ".CUSIP = " & MyViewName & ".CUSIP "
+'                strSQL = strSQL & " order by " & TmpTable & ".order ; "
+'                        Set rsTemp = ipdbBB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+'                Application.StatusBar = "Retrieval Complete.  Copying Data for field " & MyFieldName & " from " & MyViewName & "."
+'                ipOutputLoc.Cells(2, 1).CopyFromRecordset rsTemp  'Return the values
+'                Set rsTemp = Nothing
+'            End If
+'        End If
+'    End If
+'    GoTo MyExit
+'ErrorHandler:
+'    MsgBox "Error!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+'    Err.Clear
+'MyExit:
+'    Set rsTemp = Nothing
+'End Function
+'
+
+' ==============================================================================================================================
+'           COUNT VBA LINES
+' ==============================================================================================================================
+Option Explicit
+'Purpose:   Count the number of lines of code in your database.
+'Author:    Allen Browne (allen@allenbrowne.com)
+'Release:   26 November 2007
+'Copyright: None. You may use this and modify it for any database you write.
+'           All we ask is that you acknowledge the source (leave these comments in your code.)
+'Documentation: http://allenbrowne.com/vba-CountLines.html
+
+Private Const micVerboseSummary = 1
+Private Const micVerboseListAll = 2
+
+Sub CountCodeLines()
+    Dim VBCodeModule As Object
+    Dim NumLines As Long, N As Long
+    With ActiveWorkbook
+          For N = 1 To .VBProject.VBComponents.Count
+                Set VBCodeModule = .VBProject.VBComponents(N).CodeModule
+                NumLines = NumLines + VBCodeModule.CountOfLines
+          Next
+    End With
+    MsgBox "Total number of lines of code in the project = " & NumLines, , "Code Lines"
+    Set VBCodeModule = Nothing
+End Sub
+
+Public Function CountLines(Optional iVerboseLevel As Integer = 3) As Long
+On Error GoTo Err_Handler
+    'Purpose:   Count the number of lines of code in modules of current database.
+    'Requires:  Access 2000 or later.
+    'Argument:  This number is a bit field, indicating what should print to the Immediate Window:
+    '               0 displays nothing
+    '               1 displays a summary for the module type (form, report, stand-alone.)
+    '               2 list the lines in each module
+    '               3 displays the summary and the list of modules.
+    'Notes:     Code will error if dirty (i.e. the project is not compiled and saved.)
+    '           Just click Ok if a form/report is assigned to a non-existent printer.
+    '           Side effect: all modules behind forms and reports will be closed.
+    '           Code window will flash, since modules cannot be opened hidden.
+    Dim accObj As AccessObject  'Each module/form/report.
+    Dim strDoc As String        'Name of each form/report
+    Dim lngObjectCount As Long  'Number of modules/forms/reports
+    Dim lngObjectTotal As Long  'Total number of objects.
+    Dim lngLineCount As Long    'Number of lines for this object type.
+    Dim lngLineTotal As Long    'Total number of lines for all object types.
+    Dim bWasOpen As Boolean     'Flag to leave form/report open if it was open.
+
+    'Stand-alone modules.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllModules
+        'OPTIONAL: TO EXCLUDE THE CODE IN THIS MODULE FROM THE COUNT:
+        '  a) Uncomment the If ... and End If lines (3 lines later), by removing the single-quote.
+        '  b) Replace MODULE_NAME with the name of the module you saved this in (e.g. "Module1")
+        '  c) Check that the code compiles after your changes (Compile on Debug menu.)
+        'If accObj.Name <> "MODULE_NAME" Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines(accObj.Name, True, iVerboseLevel)
+        'End If
+
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " stand-alone module(s)"
+        Debug.Print
+    End If
+
+    'Modules behind forms.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllForms
+        strDoc = accObj.Name
+        bWasOpen = accObj.IsLoaded
+        If Not bWasOpen Then
+            DoCmd.OpenForm strDoc, acDesign, WindowMode:=acHidden
+        End If
+        If Forms(strDoc).HasModule Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines("Form_" & strDoc, False, iVerboseLevel)
+        End If
+        If Not bWasOpen Then
+            DoCmd.Close acForm, strDoc, acSaveNo
+        End If
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " module(s) behind forms"
+        Debug.Print
+    End If
+
+    'Modules behind reports.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllReports
+        strDoc = accObj.Name
+        bWasOpen = accObj.IsLoaded
+        If Not bWasOpen Then
+            'In Access 2000, remove the ", WindowMode:=acHidden" from the next line.
+            DoCmd.OpenReport strDoc, acDesign, WindowMode:=acHidden
+        End If
+        If Reports(strDoc).HasModule Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines("Report_" & strDoc, False, iVerboseLevel)
+        End If
+        If Not bWasOpen Then
+            DoCmd.Close acReport, strDoc, acSaveNo
+        End If
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " module(s) behind reports"
+        Debug.Print lngLineTotal & " line(s) in " & lngObjectTotal & " module(s)"
+    End If
+
+    CountLines = lngLineTotal
+
+Exit_Handler:
+    Exit Function
+
+Err_Handler:
+    Select Case Err.Number
+    Case 29068&     'This error actually occurs in GetModuleLines()
+        MsgBox "Cannot complete operation." & vbCrLf & "Make sure code is compiled and saved."
+    Case Else
+        MsgBox "Error " & Err.Number & ": " & Err.Description
+    End Select
+    Resume Exit_Handler
+End Function
+
+Private Function GetModuleLines(strModule As String, bIsStandAlone As Boolean, iVerboseLevel As Integer) As Long
+    'Usage:     Called by CountLines().
+    'Note:      Do not use error handling: must pass error back to parent routine.
+    Dim bWasOpen As Boolean     'Flag applies to standalone modules only.
+
+    If bIsStandAlone Then
+        bWasOpen = CurrentProject.AllModules(strModule).IsLoaded
+    End If
+    If Not bWasOpen Then
+        DoCmd.OpenModule strModule
+    End If
+    If (iVerboseLevel And micVerboseListAll) <> 0 Then
+        Debug.Print Modules(strModule).CountOfLines, strModule
+    End If
+    GetModuleLines = Modules(strModule).CountOfLines
+    If Not bWasOpen Then
+        DoCmd.Close acModule, strModule, acSaveYes
+    End If
+End Function
+
+
+' ==============================================================================================================================
+'           DAO STD LIBRARY FUNCTIONS
+' ==============================================================================================================================
+'Option Compare Database
+Option Explicit
+
+'Constants for examining how a field is indexed.
+Private Const intcIndexNone As Integer = 0
+Private Const intcIndexGeneral As Integer = 1
+Private Const intcIndexUnique As Integer = 3
+Private Const intcIndexPrimary As Integer = 7
+
+Function CreateTableDAO()
+    'Purpose:   Create two tables using DAO.
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim fld As DAO.Field
+    
+    'Initialize the Contractor table.
+    Set db = CurrentDb()
+    Set tdf = db.CreateTableDef("tblDaoContractor")
+    
+    'Specify the fields.
+    With tdf
+        'AutoNumber: Long with the attribute set.
+        Set fld = .CreateField("ContractorID", dbLong)
+        fld.Attributes = dbAutoIncrField + dbFixedField
+        .Fields.Append fld
+        
+        'Text field: maximum 30 characters, and required.
+        Set fld = .CreateField("Surname", dbText, 30)
+        fld.Required = True
+        .Fields.Append fld
+        
+        'Text field: maximum 20 characters.
+        .Fields.Append .CreateField("FirstName", dbText, 20)
+        
+        'Yes/No field.
+        .Fields.Append .CreateField("Inactive", dbBoolean)
+        
+        'Currency field.
+        .Fields.Append .CreateField("HourlyFee", dbCurrency)
+        
+        'Number field.
+        .Fields.Append .CreateField("PenaltyRate", dbDouble)
+        
+        'Date/Time field with validation rule.
+        Set fld = .CreateField("BirthDate", dbDate)
+        fld.ValidationRule = "Is Null Or <=Date()"
+        fld.ValidationText = "Birth date cannot be future."
+        .Fields.Append fld
+        
+        'Memo field.
+        .Fields.Append .CreateField("Notes", dbMemo)
+        
+        'Hyperlink field: memo with the attribute set.
+        Set fld = .CreateField("Web", dbMemo)
+        fld.Attributes = dbHyperlinkField + dbVariableField
+        .Fields.Append fld
+    End With
+    
+    'Save the Contractor table.
+    db.TableDefs.Append tdf
+    Set fld = Nothing
+    Set tdf = Nothing
+    Debug.Print "tblDaoContractor created."
+    
+    'Initialize the Booking table
+    Set tdf = db.CreateTableDef("tblDaoBooking")
+    With tdf
+        'Autonumber
+        Set fld = .CreateField("BookingID", dbLong)
+        fld.Attributes = dbAutoIncrField + dbFixedField
+        .Fields.Append fld
+        
+        'BookingDate
+        .Fields.Append .CreateField("BookingDate", dbDate)
+        
+        'ContractorID
+        .Fields.Append .CreateField("ContractorID", dbLong)
+        
+        'BookingFee
+        .Fields.Append .CreateField("BookingFee", dbCurrency)
+        
+        'BookingNote: Required.
+        Set fld = .CreateField("BookingNote", dbText, 255)
+        fld.Required = True
+        .Fields.Append fld
+    End With
+    
+    'Save the Booking table.
+    db.TableDefs.Append tdf
+    Set fld = Nothing
+    Set tdf = Nothing
+    Debug.Print "tblDaoBooking created."
+    
+    'Clean up
+    Application.RefreshDatabaseWindow   'Show the changes
+    Set fld = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+End Function
+
+Function ModifyTableDAO()
+    'Purpose:   How to add and delete fields to existing tables.
+    'Note:      Requires the table created by CreateTableDAO() above.
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim fld As DAO.Field
+    
+    'Initialize
+    Set db = CurrentDb()
+
+    Set tdf = db.TableDefs("tblDaoContractor")
+    
+    'Add a field to the table.
+    tdf.Fields.Append tdf.CreateField("TestField", dbText, 80)
+    Debug.Print "Field added."
+    
+    'Delete a field from the table.
+    tdf.Fields.Delete "TestField"
+    Debug.Print "Field deleted."
+    
+    'Clean up
+    Set fld = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+End Function
+
+Function DeleteTableDAO()
+    DBEngine(0)(0).TableDefs.Delete "DaoTest"
+End Function
+
+Function MakeGuidTable()
+    'Purpose:   How to create a table with a GUID field.
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim fld As DAO.Field
+    Dim prp As DAO.Property
+
+    Set db = CurrentDb()
+    Set tdf = db.CreateTableDef("Table8")
+    With tdf
+        Set fld = .CreateField("ID", dbGUID)
+        fld.Attributes = dbFixedField
+        fld.DefaultValue = "GenGUID()"
+        .Fields.Append fld
+    End With
+    db.TableDefs.Append tdf
+End Function
+
+Function CreateIndexesDAO()
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim Ind As DAO.Index
+    
+    'Initialize
+    Set db = CurrentDb()
+    Set tdf = db.TableDefs("tblDaoContractor")
+    
+    '1. Primary key index.
+    Set Ind = tdf.CreateIndex("PrimaryKey")
+    With Ind
+        .Fields.Append .CreateField("ContractorID")
+        .Unique = False
+        .Primary = True
+    End With
+    tdf.Indexes.Append Ind
+    
+    '2. Single-field index.
+    Set Ind = tdf.CreateIndex("Inactive")
+    Ind.Fields.Append Ind.CreateField("Inactive")
+    tdf.Indexes.Append Ind
+    
+    '3. Multi-field index.
+    Set Ind = tdf.CreateIndex("FullName")
+    With Ind
+        .Fields.Append .CreateField("Surname")
+        .Fields.Append .CreateField("FirstName")
+    End With
+    tdf.Indexes.Append Ind
+    
+    'Refresh the display of this collection.
+    tdf.Indexes.Refresh
+    
+    'Clean up
+    Set Ind = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+    Debug.Print "tblDaoContractor indexes created."
+End Function
+
+Function DeleteIndexDAO()
+    DBEngine(0)(0).TableDefs("tblDaoContractor").Indexes.Delete "Inactive"
+End Function
+
+Function CreateRelationDAO()
+    Dim db As DAO.Database
+    Dim rel As DAO.Relation
+    Dim fld As DAO.Field
+    
+    'Initialize
+    Set db = CurrentDb()
+    
+    'Create a new relation.
+    Set rel = db.CreateRelation("tblDaoContractortblDaoBooking")
+    
+    'Define its properties.
+    With rel
+        'Specify the primary table.
+        .Table = "tblDaoContractor"
+        'Specify the related table.
+        .ForeignTable = "tblDaoBooking"
+        'Specify attributes for cascading updates and deletes.
+        .Attributes = dbRelationUpdateCascade + dbRelationDeleteCascade
+        
+        'Add the fields to the relation.
+        'Field name in primary table.
+        Set fld = .CreateField("ContractorID")
+        'Field name in related table.
+        fld.ForeignName = "ContractorID"
+        'Append the field.
+        .Fields.Append fld
+        
+        'Repeat for other fields if a multi-field relation.
+    End With
+    
+    'Save the newly defined relation to the Relations collection.
+    db.Relations.Append rel
+    
+    'Clean up
+    Set fld = Nothing
+    Set rel = Nothing
+    Set db = Nothing
+    Debug.Print "Relation created."
+End Function
+
+Function DeleteRelationDAO()
+    DBEngine(0)(0).Relations.Delete "tblDaoContractortblDaoBooking"
+End Function
+
+Function DeleteQueryDAO()
+    DBEngine(0)(0).QueryDefs.Delete "qryDaoBooking"
+End Function
+
+Function SetPropertyDAO(obj As Object, strPropertyName As String, intType As Integer, _
+    varValue As Variant, Optional strErrMsg As String) As Boolean
+On Error GoTo ErrHandler
+    'Purpose:   Set a property for an object, creating if necessary.
+    'Arguments: obj = the object whose property should be set.
+    '           strPropertyName = the name of the property to set.
+    '           intType = the type of property (needed for creating)
+    '           varValue = the value to set this property to.
+    '           strErrMsg = string to append any error message to.
+    
+    If HasProperty(obj, strPropertyName) Then
+        obj.Properties(strPropertyName) = varValue
+    Else
+        obj.Properties.Append obj.CreateProperty(strPropertyName, intType, varValue)
+    End If
+    SetPropertyDAO = True
+
+ExitHandler:
+    Exit Function
+
+ErrHandler:
+    strErrMsg = strErrMsg & obj.Name & "." & strPropertyName & " not set to " & varValue & _
+        ". Error " & Err.Number & " - " & Err.Description & vbCrLf
+    Resume ExitHandler
+End Function
+
+Public Function HasProperty(obj As Object, strPropName As String) As Boolean
+    'Purpose:   Return true if the object has the property.
+    Dim varDummy As Variant
+    
+    On Error Resume Next
+    varDummy = obj.Properties(strPropName)
+    HasProperty = (Err.Number = 0)
+End Function
+
+Function StandardProperties(strTableName As String)
+    'Purpose:   Properties you always want set by default:
+    '           TableDef:        Subdatasheets off.
+    '           Numeric fields:  Remove Default Value.
+    '           Currency fields: Format as currency.
+    '           Yes/No fields:   Display as check box. Default to No.
+    '           Text/memo/hyperlink: AllowZeroLength off,
+    '                                UnicodeCompression on.
+    '           All fields:      Add a caption if mixed case.
+    'Argument:  Name of the table.
+    'Note:      Requires: SetPropertyDAO()
+    Dim db As DAO.Database      'Current database.
+    Dim tdf As DAO.TableDef     'Table nominated in argument.
+    Dim fld As DAO.Field        'Each field.
+    Dim strCaption As String    'Field caption.
+    Dim strErrMsg As String     'Responses and error messages.
+    
+    'Initalize.
+    Set db = CurrentDb()
+    Set tdf = db.TableDefs(strTableName)
+    
+    'Set the table's SubdatasheetName.
+    Call SetPropertyDAO(tdf, "SubdatasheetName", dbText, "[None]", _
+        strErrMsg)
+    
+    For Each fld In tdf.Fields
+        'Handle the defaults for the different field types.
+        Select Case fld.Type
+        Case dbText, dbMemo 'Includes hyperlinks.
+            fld.AllowZeroLength = False
+            Call SetPropertyDAO(fld, "UnicodeCompression", dbBoolean, _
+                True, strErrMsg)
+        Case dbCurrency
+            fld.DefaultValue = 0
+            Call SetPropertyDAO(fld, "Format", dbText, "Currency", _
+                strErrMsg)
+        Case dbLong, dbInteger, dbByte, dbDouble, dbSingle, dbDecimal
+            fld.DefaultValue = vbNullString
+        Case dbBoolean
+            Call SetPropertyDAO(fld, "DisplayControl", dbInteger, _
+                CInt(acCheckBox))
+        End Select
+        
+        'Set a caption if needed.
+        strCaption = ConvertMixedCase(fld.Name)
+        If strCaption <> fld.Name Then
+            Call SetPropertyDAO(fld, "Caption", dbText, strCaption)
+        End If
+        
+        'Set the field's Description.
+        Call SetFieldDescription(tdf, fld, , strErrMsg)
+    Next
+    
+    'Clean up.
+    Set fld = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+    If Len(strErrMsg) > 0 Then
+        Debug.Print strErrMsg
+    Else
+        Debug.Print "Properties set for table " & strTableName
+    End If
+End Function
+
+Function ConvertMixedCase(ByVal strIn As String) As String
+    'Purpose:   Convert mixed case name into a name with spaces.
+    'Argument:  String to convert.
+    'Return:    String converted by these rules:
+    '           1. One space before an upper case letter.
+    '           2. Replace underscores with spaces.
+    '           3. No spaces between continuing upper case.
+    'Example:   "FirstName" or "First_Name" => "First Name".
+    Dim lngStart As Long        'Loop through string.
+    Dim strOut As String        'Output string.
+    Dim boolWasSpace As Boolean 'Last char. was a space.
+    Dim boolWasUpper As Boolean 'Last char. was upper case.
+    
+    strIn = Trim$(strIn)        'Remove leading/trailing spaces.
+    boolWasUpper = True         'Initialize for no first space.
+    
+    For lngStart = 1& To Len(strIn)
+        Select Case Asc(Mid(strIn, lngStart, 1&))
+        Case vbKeyA To vbKeyZ   'Upper case: insert a space.
+            If boolWasSpace Or boolWasUpper Then
+                strOut = strOut & Mid(strIn, lngStart, 1&)
+            Else
+                strOut = strOut & " " & Mid(strIn, lngStart, 1&)
+            End If
+            boolWasSpace = False
+            boolWasUpper = True
+            
+        Case 95                 'Underscore: replace with space.
+            If Not boolWasSpace Then
+                strOut = strOut & " "
+            End If
+            boolWasSpace = True
+            boolWasUpper = False
+            
+        Case vbKeySpace         'Space: output and set flag.
+            If Not boolWasSpace Then
+                strOut = strOut & " "
+            End If
+            boolWasSpace = True
+            boolWasUpper = False
+            
+        Case Else               'Any other char: output.
+            strOut = strOut & Mid(strIn, lngStart, 1&)
+            boolWasSpace = False
+            boolWasUpper = False
+        End Select
+    Next
+    
+    ConvertMixedCase = strOut
+End Function
+
+Function SetFieldDescription(tdf As DAO.TableDef, fld As DAO.Field, _
+Optional ByVal strDescrip As String, Optional strErrMsg As String) _
+As Boolean
+    'Purpose:   Assign a Description to a field.
+    'Arguments: tdf = the TableDef the field belongs to.
+    '           fld = the field to document.
+    '           strDescrip = The description text you want.
+    '                        If blank, uses Caption or Name of field.
+    '           strErrMsg  = string to append any error messages to.
+    'Notes:     Description includes field size, validation,
+    '               whether required or unique.
+    
+    If (fld.Attributes And dbAutoIncrField) > 0& Then
+        strDescrip = strDescrip & " Automatically generated " & _
+            "unique identifier for this record."
+    Else
+        'If no description supplied, use the field's Caption or Name.
+        If Len(strDescrip) = 0& Then
+            If HasProperty(fld, "Caption") Then
+                If Len(fld.Properties("Caption")) > 0& Then
+                    strDescrip = fld.Properties("Caption") & "."
+                End If
+            End If
+            If Len(strDescrip) = 0& Then
+                strDescrip = fld.Name & "."
+            End If
+        End If
+        
+        'Size of the field.
+        'Ignore Date, Memo, Yes/No, Currency, Decimal, GUID,
+        '   Hyperlink, OLE Object.
+        Select Case fld.Type
+        Case dbByte, dbInteger, dbLong
+            strDescrip = strDescrip & " Whole number."
+        Case dbSingle, dbDouble
+            strDescrip = strDescrip & " Fractional number."
+        Case dbText
+            strDescrip = strDescrip & " " & fld.size & "-char max."
+        End Select
+        
+        'Required and/or Unique?
+        'Check for single-field index, and Required property.
+        Select Case IndexOnField(tdf, fld)
+        Case intcIndexPrimary
+            strDescrip = strDescrip & " Required. Unique."
+        Case intcIndexUnique
+            If fld.Required Then
+                strDescrip = strDescrip & " Required. Unique."
+            Else
+                strDescrip = strDescrip & " Unique."
+            End If
+        Case Else
+            If fld.Required Then
+                strDescrip = strDescrip & " Required."
+            End If
+        End Select
+        
+        'Validation?
+        If Len(fld.ValidationRule) > 0& Then
+            If Len(fld.ValidationText) > 0& Then
+                strDescrip = strDescrip & " " & fld.ValidationText
+            Else
+                strDescrip = strDescrip & " " & fld.ValidationRule
+            End If
+        End If
+    End If
+    
+    If Len(strDescrip) > 0& Then
+        strDescrip = Trim$(Left$(strDescrip, 255&))
+        SetFieldDescription = SetPropertyDAO(fld, "Description", _
+            dbText, strDescrip, strErrMsg)
+    End If
+End Function
+
+Private Function IndexOnField(tdf As DAO.TableDef, fld As DAO.Field) _
+As Integer
+    'Purpose:   Indicate if there is a single-field index _
+    '               on this field in this table.
+    'Return:    The constant indicating the strongest type.
+    Dim Ind As DAO.Index
+    Dim intReturn As Integer
+    
+    intReturn = intcIndexNone
+    
+    For Each Ind In tdf.Indexes
+        If Ind.Fields.Count = 1 Then
+            If Ind.Fields(0).Name = fld.Name Then
+                If Ind.Primary Then
+                    intReturn = (intReturn Or intcIndexPrimary)
+                ElseIf Ind.Unique Then
+                    intReturn = (intReturn Or intcIndexUnique)
+                Else
+                    intReturn = (intReturn Or intcIndexGeneral)
+                End If
+            End If
+        End If
+    Next
+    
+    'Clean up
+    Set Ind = Nothing
+    IndexOnField = intReturn
+End Function
+
+Function CreateQueryDAO()
+    'Purpose:   How to create a query
+    'Note:      Requires a table named MyTable.
+    Dim db As DAO.Database
+    Dim qdf As DAO.QueryDef
+    
+    Set db = CurrentDb()
+    
+    'The next line creates and automatically appends the QueryDef.
+    Set qdf = db.CreateQueryDef("qryMyTable")
+    
+    'Set the SQL property to a string representing a SQL statement.
+    qdf.Sql = "SELECT MyTable.* FROM MyTable;"
+    
+    'Do not append: QueryDef is automatically appended!
+
+    Set qdf = Nothing
+    Set db = Nothing
+    Debug.Print "qryMyTable created."
+End Function
+
+Function CreateDatabaseDAO()
+    'Purpose:   How to create a new database and set key properties.
+    Dim dbNew As DAO.Database
+    Dim prp As DAO.Property
+    Dim strFile As String
+    
+    'Create the new database.
+    strFile = "C:\SampleDAO.mdb"
+    Set dbNew = DBEngine(0).CreateDatabase(strFile, dbLangGeneral)
+    
+    'Create example properties in new database.
+    With dbNew
+        Set prp = .CreateProperty("Perform Name AutoCorrect", dbLong, 0)
+        .Properties.Append prp
+        Set prp = .CreateProperty("Track Name AutoCorrect Info", _
+            dbLong, 0)
+        .Properties.Append prp
+    End With
+    
+    'Clean up.
+    dbNew.Close
+    Set prp = Nothing
+    Set dbNew = Nothing
+    Debug.Print "Created " & strFile
+End Function
+
+Function ShowDatabaseProps()
+    'Purpose:   List the properies of the current database.
+    Dim db As DAO.Database
+    Dim prp As DAO.Property
+    
+    Set db = CurrentDb()
+    For Each prp In db.Properties
+        Debug.Print prp.Name
+    Next
+    
+    Set db = Nothing
+End Function
+
+Function ShowFields(strTable As String)
+    'Purpose:   How to read the fields of a table.
+    'Usage:     Call ShowFields("Table1")
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim fld As DAO.Field
+    
+    Set db = CurrentDb()
+    Set tdf = db.TableDefs(strTable)
+    For Each fld In tdf.Fields
+        Debug.Print fld.Name, FieldTypeName(fld)
+    Next
+    
+    Set fld = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+End Function
+
+Function ShowFieldsRS(strTable)
+    'Purpose:   How to read the field names and types from a table or query.
+    'Usage:     Call ShowFieldsRS("Table1")
+    Dim RS As DAO.Recordset
+    Dim fld As DAO.Field
+    Dim strSQL As String
+    
+    strSQL = "SELECT " & strTable & ".* FROM " & strTable & " WHERE (False);"
+    Set RS = DBEngine(0)(0).OpenRecordset(strSQL)
+    For Each fld In RS.Fields
+        Debug.Print fld.Name, FieldTypeName(fld), "from " & fld.SourceTable & "." & fld.SourceField
+    Next
+    RS.Close
+    Set RS = Nothing
+End Function
+
+Public Function FieldTypeName(fld As DAO.Field)
+    'Purpose: Converts the numeric results of DAO fieldtype to text.
+    'Note:    fld.Type is Integer, but the constants are Long.
+    Dim strReturn As String         'Name to return
+    
+    Select Case CLng(fld.Type)
+        Case dbBoolean: strReturn = "Yes/No"            ' 1
+        Case dbByte: strReturn = "Byte"                 ' 2
+        Case dbInteger: strReturn = "Integer"           ' 3
+        Case dbLong                                     ' 4
+            If (fld.Attributes And dbAutoIncrField) = 0& Then
+                strReturn = "Long Integer"
+            Else
+                strReturn = "AutoNumber"
+            End If
+        Case dbCurrency: strReturn = "Currency"         ' 5
+        Case dbSingle: strReturn = "Single"             ' 6
+        Case dbDouble: strReturn = "Double"             ' 7
+        Case dbDate: strReturn = "Date/Time"            ' 8
+        Case dbBinary: strReturn = "Binary"             ' 9 (no interface)
+        Case dbText                                     '10
+            If (fld.Attributes And dbFixedField) = 0& Then
+                strReturn = "Text"
+            Else
+                strReturn = "Text (fixed width)"
+            End If
+        Case dbLongBinary: strReturn = "OLE Object"     '11
+        Case dbMemo                                     '12
+            If (fld.Attributes And dbHyperlinkField) = 0& Then
+                strReturn = "Memo"
+            Else
+                strReturn = "Hyperlink"
+            End If
+        Case dbGUID: strReturn = "GUID"                 '15
+        
+        'Attached tables only: cannot create these in JET.
+        Case dbBigInt: strReturn = "Big Integer"        '16
+        Case dbVarBinary: strReturn = "VarBinary"       '17
+        Case dbChar: strReturn = "Char"                 '18
+        Case dbNumeric: strReturn = "Numeric"           '19
+        Case dbDecimal: strReturn = "Decimal"           '20
+        Case dbFloat: strReturn = "Float"               '21
+        Case dbTime: strReturn = "Time"                 '22
+        Case dbTimeStamp: strReturn = "Time Stamp"      '23
+        
+        'Constants for complex types don't work prior to Access 2007.
+        Case 101&: strReturn = "Attachment"         'dbAttachment
+        Case 102&: strReturn = "Complex Byte"       'dbComplexByte
+        Case 103&: strReturn = "Complex Integer"    'dbComplexInteger
+        Case 104&: strReturn = "Complex Long"       'dbComplexLong
+        Case 105&: strReturn = "Complex Single"     'dbComplexSingle
+        Case 106&: strReturn = "Complex Double"     'dbComplexDouble
+        Case 107&: strReturn = "Complex GUID"       'dbComplexGUID
+        Case 108&: strReturn = "Complex Decimal"    'dbComplexDecimal
+        Case 109&: strReturn = "Complex Text"       'dbComplexText
+        Case Else: strReturn = "Field type " & fld.Type & " unknown"
+    End Select
+    
+    FieldTypeName = strReturn
+End Function
+
+Function DAORecordsetExample()
+    'Purpose:   How to open a recordset and loop through the records.
+    'Note:      Requires a table named MyTable, with a field named MyField.
+    Dim RS As DAO.Recordset
+    Dim strSQL As String
+    
+    strSQL = "SELECT MyField FROM MyTable;"
+    Set RS = DBEngine(0)(0).OpenRecordset(strSQL)
+    
+    Do While Not RS.EOF
+        Debug.Print RS!MyField
+        RS.MoveNext
+    Loop
+    
+    RS.Close
+    Set RS = Nothing
+End Function
+
+Function ShowFormProperties(strFormName As String)
+On Error GoTo Err_Handler
+    'Purpose:   Loop through the controls on a form, showing names and properties.
+    'Usage:     Call ShowFormProperties("Form1")
+    Dim frm As Form
+    Dim ctl As Control
+    Dim prp As Property
+    Dim strOut As String
+    
+    DoCmd.OpenForm strFormName, acDesign, WindowMode:=acHidden
+    Set frm = Forms(strFormName)
+    
+    For Each ctl In frm
+        For Each prp In ctl.Properties
+            strOut = strFormName & "." & ctl.Name & "." & prp.Name & ": "
+            strOut = strOut & prp.Type & vbTab
+            strOut = strOut & prp.Value
+            Debug.Print strOut
+        Next
+        If ctl.ControlType = acTextBox Then Stop
+    Next
+    
+    Set frm = Nothing
+    DoCmd.Close acForm, strFormName, acSaveNo
+
+Exit_Handler:
+    Exit Function
+
+Err_Handler:
+    Select Case Err.Number
+    Case 2186:
+        strOut = strOut & Err.Description
+        Resume Next
+    Case Else
+        MsgBox "Error " & Err.Number & ": " & Err.Description, vbExclamation, "ShowFormProperties()"
+        Resume Exit_Handler
+    End Select
+End Function
+
+Public Function ExecuteInTransaction(strSQL As String, Optional strConfirmMessage As String) As Long
+On Error GoTo Err_Handler
+    'Purpose:   Execute the SQL statement on the current database in a transaction.
+    'Return:    RecordsAffected if zero or above.
+    'Arguments: strSql = the SQL statement to be executed.
+    '           strConfirmMessage = the message to show the user for confirmation. Number will be added to front.
+    '           No confirmation if ZLS.
+    '           -1 on error.
+    '           -2 on user-cancel.
+    Dim WS As DAO.Workspace
+    Dim db As DAO.Database
+    Dim bInTrans As Boolean
+    Dim bCancel As Boolean
+    Dim strMsg As String
+    Dim lngReturn As Long
+    Const lngcUserCancel = -2&
+    
+    Set WS = DBEngine(0)
+    WS.BeginTrans
+    bInTrans = True
+    Set db = WS(0)
+    db.Execute strSQL, dbFailOnError
+    lngReturn = db.RecordsAffected
+    If strConfirmMessage <> vbNullString Then
+        If MsgBox(lngReturn & " " & Trim$(strConfirmMessage), vbOKCancel + vbQuestion, "Confirm") <> vbOK Then
+            bCancel = True
+            lngReturn = lngcUserCancel
+        End If
+    End If
+    
+    'Commmit or rollback.
+    If bCancel Then
+        WS.Rollback
+    Else
+        WS.CommitTrans
+    End If
+    bInTrans = False
+
+Exit_Handler:
+    ExecuteInTransaction = lngReturn
+    On Error Resume Next
+    Set db = Nothing
+    If bInTrans Then
+        WS.Rollback
+    End If
+    Set WS = Nothing
+    Exit Function
+
+Err_Handler:
+    MsgBox "Error " & Err.Number & ": " & Err.Description, vbExclamation, "ExecuteInTransaction()"
+    lngReturn = -1
+    Resume Exit_Handler
+End Function
+
+Function GetAutoNumDAO(strTable) As String
+    'Purpose:   Get the name of the AutoNumber field, using DAO.
+    Dim db As DAO.Database
+    Dim tdf As DAO.TableDef
+    Dim fld As DAO.Field
+    
+    Set db = CurrentDb()
+    Set tdf = db.TableDefs(strTable)
+    
+    For Each fld In tdf.Fields
+        If (fld.Attributes And dbAutoIncrField) <> 0 Then
+            GetAutoNumDAO = fld.Name
+            Exit For
+        End If
+    Next
+    
+    Set fld = Nothing
+    Set tdf = Nothing
+    Set db = Nothing
+End Function
+
+
+' ==============================================================================================================================
+'           IRU MACROS
+' ==============================================================================================================================
+Option Explicit
+Public Function iruSICCode(OpParm As Integer, Optional OrigCUSIP As String) As String
+'Parm Values:
+'        1 - Requires FULL CUSIP, returns SIC Code
+'        2 - Requires only CUSIP issuer (6 chars), returns SIC Code
+'        3 - Requires FULL CUSIP, returns Description
+'        4 - Requires only CUSIP issuer (6 chars), returns Description
+
+'Const CUSIPList = 2
+Const ProvideMsgs = 0 'should there be message boxes for error messages, or just return to error codes to the cell?
+Const ProbCharA = "#"
+Const ProbCharB = "*"
+Const ProbCharC = "@"
+Const ReplaceA = "¼"
+Const ReplaceB = "½"
+Const ReplaceC = "¾"
+Const RefFileName = "SICCODES-2010.XLS" 'Be sure to use ALL CAPS!!!
+Const DataSheetName = "CS-10"
+Const MyIssuerRange = "a3:a3804" ' My ISSUER = CUSIP Issuer Code
+Const MyCUSIPRange = "b3:b3804" ' My ISSUE = full cusip
+Const SICCodeRange = "c3:c3804"
+Const DescriptionRange = "d3:d3804"
+
+Dim MyWorkBook As Workbook
+Dim CFWorkBook As Workbook
+Dim NewText As String
+Dim TrickChar1 As String
+Dim R1 As Range
+Dim R2 As Range
+Dim vReturnCode As Variant
+Dim Cntr As Byte
+
+On Error GoTo CheckError
+
+'If Len(OrigCusip) <> 9 Then
+'    SICCode = "Bad Cusip!"
+'    Exit Function
+'End If
+'Create MyCusip using the "regular" Cusip (which includes "*","#", and "@"-characters which mess up the "Match" function
+If OpParm <> 1 And OpParm <> 2 And OpParm <> 3 And OpParm <> 4 Then 'Illegal OpParm- seeking help!
+    iruSICCode = "iruSICCode(#,<CUSIP or Issur>). #:1,2-SIC,3,4-Desc'n"
+    Exit Function
+End If
+If OpParm = 1 Or OpParm = 3 Then ' Full CUSIP will be specified
+    NewText = Left(OrigCUSIP, 5)
+    For Cntr = 6 To 8
+        TrickChar1 = Right(Left(OrigCUSIP, Cntr), 1)
+        If TrickChar1 = ProbCharA Then
+            NewText = NewText & ReplaceA
+        ElseIf TrickChar1 = ProbCharB Then
+            NewText = NewText & ReplaceB
+        ElseIf TrickChar1 = ProbCharC Then
+            NewText = NewText & ReplaceC
+        Else
+            NewText = NewText & TrickChar1
+        End If
+    Next Cntr
+ElseIf OpParm = 2 Or OpParm = 4 Then ' only need CUSIP Issuer
+    NewText = Left(OrigCUSIP, 6)
+    TrickChar1 = Right(NewText, 1)
+    NewText = Left(NewText, 5)
+    'TrickChar1 = Right(OrigCusip, 1) 'last character could be eithe
+    If TrickChar1 = ProbCharA Then
+        NewText = NewText & ReplaceA
+    ElseIf TrickChar1 = ProbCharB Then
+        NewText = NewText & ReplaceB
+    ElseIf TrickChar1 = ProbCharC Then
+        NewText = NewText & ReplaceC
+    Else
+        NewText = NewText & TrickChar1
+    End If
+Else
+    'Illegal OpParm
+    iruSICCode = "iruSICCode(#,<CUSIP/Issur>). #:1,2-SIC,3,4-Desc'n"
+    Exit Function
+End If
+
+Set MyWorkBook = ActiveWorkbook
+
+For Cntr = 1 To Workbooks.Count 'cycle through all open workbooks to get to the reference data workbook
+    If UCase(Workbooks(Cntr).Name) = RefFileName Then
+        Set CFWorkBook = Workbooks(Cntr)
+        Exit For
+    End If
+Next Cntr
+
+If CFWorkBook Is Nothing Then 'open the file!
+    MsgBox "Be sure that the " & RefFileName & " file is open before proceeding!"
+    Set MyWorkBook = Nothing
+'    Set CFWorkBook = Workbooks.Open(Filename:="C:\CUSIP-CE.xls")
+    Exit Function
+End If
+'switch workbooks
+CFWorkBook.Activate
+'Sheets("Sheet1").Activate
+'Specify reference range to search
+'For Cntr = 1 To CFWorkBook.Names.Count
+'    vReturnCode = CFWorkBook.Names(Cntr)
+'Next Cntr
+'TrickChar1 = CFWorkBook.Worksheets("Sheet1").Range("B2").Value
+
+'If NewText <= "599999*" Then 'Search for Cusip in R1
+'    vReturnCode = Worksheets("Sheet1").Range("B2").Value
+If OpParm = 1 Then ' Full CUSIP to SIC
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyCUSIPRange)
+    Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+ElseIf OpParm = 2 Then 'Issuer to SIC
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyIssuerRange)
+    Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+ElseIf OpParm = 3 Then ' Full CUSIP to Description
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyCUSIPRange)
+    Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+ElseIf OpParm = 4 Then ' Issuer to Description
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyIssuerRange)
+    Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+End If
+
+'Search the range
+vReturnCode = Application.WorksheetFunction.Match(NewText, R1, 0)
+iruSICCode = R2.Cells(CLng(vReturnCode), 1)
+
+GoTo ExitRamp
+CheckError:
+
+
+If ProvideMsgs Then MsgBox NewText & " Err #:" & Err & ", " & Error(Err) 'write the error message
+
+iruSICCode = ""
+
+ExitRamp:
+MyWorkBook.Activate
+Set R1 = Nothing
+Set R2 = Nothing
+LastExit:
+Set MyWorkBook = Nothing
+Set CFWorkBook = Nothing
+End Function
+Public Function BType(CUSIP As String, Optional OpParm As Integer) As Variant
+' This will be located in Azar's personal macro sheet.
+' Based on a given CUSIP, function will return a bond type, bond sub type,
+' Description, SIC Code, and/or whether SIC Code is unique
+
+'Parm Values: (all require full CUSIP)
+'   0 (or missing) - Return Bond Type based on CUSIP provided
+'   1 - Return Description
+'   2 - Collateral Description (where available
+'   3 - Return Bond Type number
+'   4 - Return Bond Sub Type number
+'
+Const BONDTYPETXT = 0
+Const ISSUER = 1
+Const COLLATERAL = 2
+Const BDTYP = 3
+Const BDSUBTYP = 4
+
+Const ProvideMsgs = 0 'should there be message boxes for error messages, or just return to error codes to the cell?  A "Match" doesn't work means that the cusip wasnt found
+Const ProbCharA = "#"
+Const ProbCharB = "*"
+Const ProbCharC = "@"
+Const ReplaceA = "¼"
+Const ReplaceB = "½"
+Const ReplaceC = "¾"
+Const RefFileName = "ABSLIST.XLS" 'Be sure to use ALL CAPS!!!
+
+Const MyCUSIPRange = "A2:A30001" ' My ISSUE = full cusip
+Const BondTypeRange = "E2:E30001"
+Const BondSubTypeRange = "F2:F30001"
+Const DescriptionRange = "G2:G30001"
+Const CollateralRange = "H2:H30001"
+Const MyIssuerRange = "B2:B30001"
+
+Const Lo1 = "00011¼AA"
+Const Hi1 = "ZZ206636"
+Const Lo2 = "" ' these allow for breakdowns and additions down the road
+Const Hi2 = ""
+Const Lo3 = ""
+Const Hi3 = ""
+Const Lo4 = ""
+Const Hi4 = ""
+Const Lo5 = ""
+Const Hi5 = ""
+Const Lo6 = ""
+Const Hi6 = ""
+Const Lo7 = ""
+Const Hi7 = "ZZ206338"
+
+Dim MyWorkBook As Workbook
+Dim CFWorkBook As Workbook
+Dim DataSheetName As String
+Dim MyCUSIP As String
+Dim OrigCUSIP As String
+Dim MyIssuer As String
+Dim UseJustIssuer As Boolean
+Dim TrickChar1 As String
+Dim R1 As Range
+Dim R2 As Range
+Dim vReturnCode As Variant
+Dim Cntr As Byte
+Dim MyParm As Byte
+Dim MyType As Byte
+Dim MySubType As Byte
+
+On Error GoTo CheckError
+'must do this work first, because the exit ramp forces closure of the various objects and activates the proper work sheet
+Set MyWorkBook = ActiveWorkbook
+'Cntr = 0
+For Cntr = 1 To Workbooks.Count 'cycle through all open workbooks to get to the reference data workbook
+    If UCase(Workbooks(Cntr).Name) = RefFileName Then
+        Set CFWorkBook = Workbooks(Cntr)
+        Exit For
+    End If
+Next Cntr
+
+If CFWorkBook Is Nothing Then 'open the file!
+    vReturnCode = "Be sure that the " & RefFileName & " file is open before proceeding!"
+    If ProvideMsgs Then
+        MsgBox vReturnCode
+    Else
+        BType = vReturnCode
+    End If
+    GoTo ExitRamp 'Exit Function
+End If
+'switch workbooks
+CFWorkBook.Activate
+'send parameter help if opParm is nonsense
+If OpParm <> 0 And OpParm <> 1 And OpParm <> 2 And OpParm <> 3 And OpParm <> 4 And OpParm <> 10 And OpParm <> 11 And OpParm <> 12 And OpParm <> 13 And OpParm <> 14 Then 'Illegal OpParm
+    BType = "BType(CUSIP,[#]) #: 0 - Bond Type, " & ISSUER & "-Issuer/Desc," & COLLATERAL & "-Colat'l"
+    GoTo ExitRamp ' Exit Function
+End If
+Cntr = Len(CUSIP)
+UseJustIssuer = False
+If Cntr = 6 Or OpParm >= 10 Then
+    UseJustIssuer = True
+    OrigCUSIP = CUSIP
+ElseIf Cntr > 9 Or Cntr < 6 Or Cntr = 7 Then
+    BType = "Bad Cusip: '" & CUSIP & "'"
+    GoTo ExitRamp ' Exit Function
+ElseIf Cntr = 8 Then
+    OrigCUSIP = CUSIP
+Else 'CUSIP length is 9 - We can check the last digit for a valid cusip number here, and alert if invalid!
+    vReturnCode = CUSIPCheck(Left(CUSIP, 8), Right(CUSIP, 1))
+    If vReturnCode Then 'if nonzero return code, there is a problem with the CUSIP code!
+        BType = "INVALID CUSIP! Correct CUSIP and retry!"
+        GoTo ExitRamp
+    End If
+    OrigCUSIP = Left(CUSIP, 8)
+End If
+
+
+'clean up the inputs, if necessary
+If OpParm >= 10 Then
+    MyParm = OpParm - 10
+Else
+    MyParm = OpParm
+End If
+'to make this as flexible as possible, be prepared to process the cusip whether it is in MyCUSIP form or not
+For Cntr = 1 To Len(OrigCUSIP)
+    TrickChar1 = Right(Left(OrigCUSIP, Cntr), 1)
+    If TrickChar1 = ProbCharA Then
+        MyCUSIP = MyCUSIP & ReplaceA
+    ElseIf TrickChar1 = ProbCharB Then
+        MyCUSIP = MyCUSIP & ReplaceB
+    ElseIf TrickChar1 = ProbCharC Then
+        MyCUSIP = MyCUSIP & ReplaceC
+    Else
+        MyCUSIP = MyCUSIP & TrickChar1
+    End If
+Next Cntr
+MyIssuer = Left(MyCUSIP, 6)
+
+'is the given cusip within the range of cusips in our database?
+If UseJustIssuer Then
+    If MyIssuer < Left(Lo1, 6) Or MyIssuer > Left(Hi7, 6) Then
+        MsgBox "This CUSIP is outside our range!"
+        GoTo ExitRamp
+    End If
+Else 'use full cusip
+    If MyCUSIP < Lo1 Or MyCUSIP > Hi7 Then
+        MsgBox "This CUSIP is outside our range!"
+        GoTo ExitRamp
+    End If
+End If
+'If MyIssuer >= Left(Lo1, 6) And MyIssuer <= Left(Hi1, 6) Then
+DataSheetName = "B1"
+'ElseIf MyIssuer >= Left(Lo2, 6) And MyIssuer <= Left(Hi2, 6) Then  'this is only required if there are additional sheets. Default is a single spreadsheet
+'    DataSheetName = "B2"
+'ElseIf MyIssuer >= Left(Lo3, 6) And MyIssuer <= Left(Hi3, 6) Then
+'    DataSheetName = "B3"
+'ElseIf MyIssuer >= Left(Lo4, 6) And MyIssuer <= Left(Hi4, 6) Then
+'    DataSheetName = "B4"
+'ElseIf MyIssuer >= Left(Lo5, 6) And MyIssuer <= Left(Hi5, 6) Then
+'    DataSheetName = "B5"
+'ElseIf MyIssuer >= Left(Lo6, 6) And MyIssuer <= Left(Hi6, 6) Then
+'    DataSheetName = "B6"
+'Else
+'    DataSheetName = "B7"
+'End If
+'determine the range to search
+If UseJustIssuer Then
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyIssuerRange)
+    vReturnCode = Application.WorksheetFunction.Match(MyIssuer, R1, 0)
+Else 'use the full MyCUSIP range(s)
+    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyCUSIPRange)
+    vReturnCode = Application.WorksheetFunction.Match(MyCUSIP, R1, 0)
+End If
+'determine the range to retrieve based on the OpParm value
+Select Case MyParm
+    Case ISSUER
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+        BType = R2.Cells(CLng(vReturnCode), 1)
+        GoTo ExitRamp
+    Case COLLATERAL
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(CollateralRange)
+        BType = R2.Cells(CLng(vReturnCode), 1)
+        GoTo ExitRamp
+    Case BDTYP
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+        BType = R2.Cells(CLng(vReturnCode), 1)
+        GoTo ExitRamp
+    Case BDSUBTYP
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+        BType = R2.Cells(CLng(vReturnCode), 1)
+        GoTo ExitRamp
+    Case BONDTYPETXT
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+        MyType = R2.Cells(CLng(vReturnCode), 1)
+        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+        MySubType = R2.Cells(CLng(vReturnCode), 1)
+        BType = BType2Txt(MyType, MySubType)
+        GoTo ExitRamp
+    Case Else
+        If ProvideMsgs Then MsgBox "Illegal optional parameter"
+        GoTo ExitRamp
+End Select
+
+CheckError:
+
+    If ProvideMsgs Then MsgBox "CUSIP '" & CUSIP & "' Err #:" & Err & ", " & Error(Err)
+
+    BType = "" ' this is to clear out the returns when the bond is not found!
+
+ExitRamp:
+MyWorkBook.Activate
+Set R1 = Nothing
+Set R2 = Nothing
+LastExit:
+Set MyWorkBook = Nothing
+Set CFWorkBook = Nothing
+End Function
+Function CUSIPCheck(ipCUSIP As String, Optional ipChkDigit As String) As Byte
+'the purpose of this function is to confirm the check digit or, if not provided,
+' to supply the check digit in the return code
+Dim Sum As Integer
+Dim i As Byte
+Dim c As String
+Dim v As Byte
+Dim ConfirmDigit As Boolean
+Dim MyCUSIP As String
+Dim MyChkDigit As String
+Const ERRORCODE = 255
+Const VALIDCODE = 0
+    'do minimal error checking.  Are parameters all there?
+    If ipCUSIP = "000000000" Or ipCUSIP = "00000000" Then
+        CUSIPCheck = 255
+    ElseIf Len(ipCUSIP) = 9 And Val(ipChkDigit) > 0 Then   ' they are looking for a text message explaining the parameter string required (or they've supplied a 9 char CUSIP AND a checkdigit - No sense!)!
+        CUSIPCheck = "Usage: CusipCheck(CUSIP8or9, [ChkDigit]) If Checkdigit is provided, 0 = valid, -1 = invalid, else returns valid ChkDigit"
+    Else
+        If Len(ipCUSIP) = 9 Then
+            MyCUSIP = Mid(ipCUSIP, 1, 8)
+            MyChkDigit = Mid(ipCUSIP, 9, 1)
+            If IsNumeric(MyChkDigit) Then
+                ConfirmDigit = True
+            Else
+                CUSIPCheck = ERRORCODE
+                GoTo MyExit
+            End If
+        ElseIf Len(ipCUSIP) = 8 Then
+            MyCUSIP = ipCUSIP
+            If Not IsNull(ipChkDigit) And Len(ipChkDigit) = 1 And IsNumeric(ipChkDigit) Then  'a check digit is provided, and it appears to be valid
+                MyChkDigit = ipChkDigit 'they have provided a checkdigit, and they want to confirm validity
+                ConfirmDigit = True
+            Else
+                ConfirmDigit = False 'they want a checkdigit
+            End If
+        Else ' it looks like the CUSIP is shorter (or longer) than 8 characters and is invalid.  Send an error code!
+            CUSIPCheck = ERRORCODE
+            GoTo MyExit
+        End If
+        'process the CUSIP info
+        Sum = 0
+        For i = 1 To 8 'for 1 = i = 8 do
+            c = Mid(MyCUSIP, i, 1) '      c := the ith character of cusi
+            If IsNumeric(c) Then   '      if c is a digit then
+                v = Val(c)         '         v := numeric value of the digit c
+            ElseIf c = "*" Then    '      else if c = "*" then
+                v = 36             '         v := 36
+            ElseIf c = "@" Then    '      else if c = "@" then
+                v = 37              '         v := 37
+            ElseIf c = "#" Then     '      else if c = "#" then
+                v = 38              '         v := 38
+            ElseIf c = " " Or c = "$" Or c = "-" Then
+                CUSIPCheck = ERRORCODE
+                GoTo MyExit
+            Else         '      else if c is a letter then
+                v = Asc(UCase(c)) + 9 - 64           '         v := ordinal position of c in the alphabet + 9 (PREVIOUSLY DONE WITH CODE(C) - 55 calculation
+            End If                  '      End If
+            If 1 - (i Mod 2) Then    '      If i Is Even Then
+                v = v * 2           '         v := v × 2
+            End If                  '      End If
+            Sum = Sum + v \ 10 + v Mod 10     '      sum := sum + v div 10 + v mod 10
+        Next i '   Repeat
+        CUSIPCheck = (10 - Sum Mod 10) Mod 10 ' the formula
+        If ConfirmDigit Then
+            If MyChkDigit = CUSIPCheck Then
+                CUSIPCheck = VALIDCODE
+            Else
+                CUSIPCheck = ERRORCODE
+            End If
+        End If
+    End If
+MyExit:
+End Function
+
+Function BType2Txt(BondType As Byte, Optional SubType As Byte) As Variant
+
+Select Case BondType
+    Case 0
+        BType2Txt = "Bond Type not defined"
+    Case 1
+        If SubType = 1 Then
+            BType2Txt = "US Government Agency"
+        ElseIf SubType = 2 Then
+            BType2Txt = "Overseas Aid and/or guaranteed by US Government"
+        Else
+            BType2Txt = "US Treasury or Gov't Agency and/or g'teed by same"
+        End If
+    Case 2
+        BType2Txt = "Foreign Government Bond"
+    Case 3
+        BType2Txt = "Municipal Bond"
+        If SubType = 1 Then
+            BType2Txt = BType2Txt & "-General Obligation"
+        ElseIf SubType = 2 Then
+            BType2Txt = BType2Txt & "-Water/Sewer/Utility"
+        ElseIf SubType = 3 Then
+            BType2Txt = BType2Txt & "-School District"
+        ElseIf SubType = 4 Then
+            BType2Txt = BType2Txt & "-Financing Authority"
+        ElseIf SubType = 5 Then
+            BType2Txt = BType2Txt & "-Bridge/Highway/Airport/Transportation"
+        ElseIf SubType = 6 Then
+            BType2Txt = BType2Txt & "-University funding (public or private)"
+        ElseIf SubType = 7 Then
+            BType2Txt = BType2Txt & "-Hospital"
+        ElseIf SubType = 8 Then
+            BType2Txt = BType2Txt & "-Military Housing"
+        Else
+            'add nothing
+        End If
+    Case 4
+        BType2Txt = "Agency RMBS"
+        If SubType = 1 Then
+            BType2Txt = BType2Txt & "-Ginnie Mae"
+        ElseIf SubType = 2 Then
+            BType2Txt = BType2Txt & "-Fannie Mae"
+        ElseIf SubType = 3 Then
+            BType2Txt = BType2Txt & "-Freddie Mac"
+        ElseIf SubType = 4 Then
+            BType2Txt = BType2Txt & "-Other Agency"
+        Else
+            'add nothing
+        End If
+    Case 5
+        BType2Txt = "Agency CMBS"
+        If SubType = 1 Then
+            BType2Txt = BType2Txt & "-SBA"
+        End If
+    Case 6
+        BType2Txt = "Non-Agency RMBS"
+    Case 7
+        BType2Txt = "Non-Agency CMBS"
+    Case 8
+        BType2Txt = "Corporate Bond"
+        If SubType = 1 Then
+            BType2Txt = BType2Txt & "-Direct Obligation"
+        ElseIf SubType = 2 Then
+            BType2Txt = BType2Txt & "-Company Guaranteed"
+        ElseIf SubType = 3 Then
+            BType2Txt = BType2Txt & "-Unaffiliated Guarantee Provided"
+        Else
+            'add nothing
+        End If
+    Case 9
+        BType2Txt = "ABS"
+        If SubType = 1 Then
+            BType2Txt = BType2Txt & "-Credit Card Debt"
+        ElseIf SubType = 2 Then
+            BType2Txt = BType2Txt & "-Auto Loans"
+        ElseIf SubType = 3 Then
+            BType2Txt = BType2Txt & "-Home Equity Loans"
+        ElseIf SubType = 4 Then
+            BType2Txt = BType2Txt & "-Manufactured Housing Loans"
+        ElseIf SubType = 5 Then
+            BType2Txt = BType2Txt & "-Student Loans"
+        ElseIf SubType = 6 Then
+            BType2Txt = BType2Txt & "-Equipment Leases"
+        ElseIf SubType = 7 Then
+            BType2Txt = BType2Txt & "-CLO/CDO/CBO"
+        ElseIf SubType = 8 Then
+            BType2Txt = BType2Txt & "-Other"
+        ElseIf SubType = 9 Then
+            BType2Txt = BType2Txt & "-Trade Receivables"
+        ElseIf SubType = 10 Then
+            BType2Txt = BType2Txt & "-Utilities Receivable"
+        ElseIf SubType = 11 Then
+            BType2Txt = BType2Txt & "-Tax"
+        ElseIf SubType = 12 Then
+            BType2Txt = BType2Txt & "-Airline Loans/Airplane ETCs"
+        ElseIf SubType = 13 Then
+            BType2Txt = BType2Txt & "-Marine Loans/ETCs"
+        ElseIf SubType = 14 Then
+            BType2Txt = BType2Txt & "-Railroad Loans/Railcar ETCs"
+        ElseIf SubType = 15 Then
+            BType2Txt = BType2Txt & "-Other ETC / PTC "
+        ElseIf SubType = 16 Then
+            BType2Txt = BType2Txt & "-Mobile Home/RV/Boat Loans"
+        ElseIf SubType = 17 Then
+            BType2Txt = BType2Txt & "-Time Share Receipts"
+        ElseIf SubType = 18 Then
+            BType2Txt = BType2Txt & "-Sports Leagues/Teams"
+        ElseIf SubType = 19 Then
+            BType2Txt = BType2Txt & "-Corporate Mortgages"
+        Else
+            'add nothing
+        End If
+    Case 10
+        BType2Txt = "Credit Tenant Loan (Retail Space)"
+    Case 13
+        BType2Txt = "Hybrid Security"
+    Case 15
+        BType2Txt = "Mutual Fund/Index Fund/ETF"
+    Case 40
+        BType2Txt = "Bond Expired due to Maturity"
+    Case 60
+        BType2Txt = "Bond Prepaid and/or withdrawn"
+    Case 80
+        'dont have a suitable description yet
+    Case Else
+        BType2Txt = BondType & " Unknown bond type"
+End Select
+End Function
+Public Function BClass(ipLineNum As Variant, Optional ipBondType As Byte) As Variant
+'Developed 6/27/11 by C Fahey
+'Function:  1. if just a line number is provided, provide a bond class based on that line number
+'           2. If a bond type is also supplied, confirm that the bond type is properly assigned based on that line (i.e. return 0)
+'              or that the line number is inconsistent with that bond type assigned (return 1)
+Dim LineNum As Long
+Dim CheckBondType As Boolean
+       
+    If Len(ipBondType) = 0 Or ipBondType = 0 Then
+        CheckBondType = False
+    Else
+        CheckBondType = True
+    End If
+    LineNum = Val(ipLineNum)
+    LineNum = Round(LineNum / 100000, 0)
+    BClass = LineNum
+    If CheckBondType Then
+        'assume the worst!
+        BClass = 1
+        Select Case LineNum
+            Case 1
+                If ipBondType = 1 Then BClass = 0
+            Case 2, 3
+                If ipBondType = 1 Or ipBondType = 4 Or ipBondType = 9 Then BClass = 0
+            Case 4, 5, 6, 7, 8, 9, 10
+                If ipBondType = 2 Then BClass = 0
+            Case 11
+                If ipBondType = 3 Then BClass = 0
+            Case 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 ' this may need to be refined
+                If ipBondType = 3 Then BClass = 0
+            Case 26
+                If ipBondType = 4 Or ipBondType = 9 Then BClass = 0
+            Case 27, 28
+                If ipBondType = 4 Then BClass = 0
+            Case 29
+                If ipBondType = 5 Then BClass = 0
+            Case 30, 31
+                If ipBondType = 5 Or ipBondType = 9 Then BClass = 0
+            Case 32
+                If ipBondType = 8 Then BClass = 0
+            Case 33
+                If ipBondType = 6 Or ipBondType = 8 Or ipBondType = 9 Then BClass = 0
+            Case 34, 35
+                If ipBondType = 6 Or ipBondType = 8 Then BClass = 0
+            Case 36
+                If ipBondType = 7 Or ipBondType = 8 Then BClass = 0
+            Case 37, 38
+                If ipBondType = 7 Or ipBondType = 8 Or ipBondType = 9 Then BClass = 0
+            Case 39
+                If ipBondType = 10 Then BClass = 0
+            Case 40, 41
+                If ipBondType = 7 Or ipBondType = 10 Then BClass = 0
+            Case 42
+                If ipBondType = 8 Or ipBondType = 13 Then BClass = 0
+            Case 43
+                If ipBondType = 6 Or ipBondType = 7 Or ipBondType = 8 Or ipBondType = 9 Or ipBondType = 13 Then BClass = 0
+            Case 44, 45
+                If ipBondType = 6 Or ipBondType = 8 Or ipBondType = 13 Then BClass = 0
+             Case 46
+                If ipBondType = 7 Or ipBondType = 8 Or ipBondType = 13 Then BClass = 0
+             Case 47, 48
+                If ipBondType = 7 Or ipBondType = 8 Or ipBondType = 9 Or ipBondType = 13 Then BClass = 0
+            Case 49
+                If ipBondType = 11 Then BClass = 0
+            Case 50
+                If ipBondType = 6 Or ipBondType = 7 Or ipBondType = 9 Or ipBondType = 11 Then BClass = 0
+            Case 51, 52
+                If ipBondType = 6 Or ipBondType = 11 Then BClass = 0
+            Case 53
+                If ipBondType = 7 Or ipBondType = 11 Then BClass = 0
+            Case 54, 55
+                If ipBondType = 7 Or ipBondType = 9 Or ipBondType = 11 Then BClass = 0
+            Case 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
+                BClass = "Incorrect line number!"
+            Case Else
+                BClass = "Confirm line number!"
+        End Select
+    Else
+        Select Case LineNum
+            Case 1 To 3
+                BClass = "US Gov't/Agency/GSE"
+            Case 4
+                 BClass = "Foreign Gov't Bond"
+            Case 5
+                 BClass = "Foreign Gov't MBS / ABS"
+            Case 6, 7
+                 BClass = "Foreign Gov't RMBS"
+            Case 8
+                BClass = "Foreign Gov't CMBS"
+            Case 9, 10
+                BClass = "Foreign Gov't CMBS / ABS"
+            Case 11
+                BClass = "State Muni GO"
+            Case 12
+                BClass = "State Muni MBS / ABS"
+            Case 13, 14
+                BClass = "State Muni RMBS"
+            Case 15
+                BClass = "State Muni CMBS"
+            Case 16, 17
+                BClass = "State Muni CMBS / ABS"
+            Case 18
+                BClass = "Local Muni GO"
+            Case 19
+                BClass = "Local Muni MBS / ABS"
+            Case 20, 21
+                BClass = "Local Muni RMBS"
+            Case 22
+                BClass = "Local Muni CMBS"
+            Case 23, 24
+                BClass = "Local Muni CMBS / ABS"
+            Case 25
+                BClass = "Muni Rev/Agency Bond"
+            Case 26
+                BClass = "Agency MBS / ABS"
+            Case 27, 28
+                BClass = "Agency RMBS"
+            Case 29
+                BClass = "Agency CMBS"
+            Case 30, 31
+                BClass = "Agency CMBS / ABS"
+            Case 32
+                BClass = "Corporate Bond"
+            Case 33
+                BClass = "Private MBS / ABS"
+            Case 34, 35
+                BClass = "Private RMBS"
+            Case 36
+                BClass = "Private CMBS"
+            Case 37, 38
+                BClass = "Private CMBS / ABS"
+            Case 39, 40, 41
+                BClass = "Credit Tenant Loan"
+            Case 42
+                BClass = "Hybrid Security"
+            Case 43
+                BClass = "Hybrid Security MBS / ABS"
+            Case 44, 45
+                BClass = "Hybrid Security RMBS"
+            Case 46
+                BClass = "Hybrid Security CMBS"
+            Case 47, 48
+                BClass = "Hybrid Security CMBS / ABS"
+            Case 49
+                BClass = "Affiliated Bond"
+            Case 50
+                BClass = "Affiliated Bond MBS / ABS"
+            Case 51, 52
+                BClass = "Affiliated Bond RMBS"
+            Case 53
+                BClass = "Affiliated Bond CMBS"
+            Case 54, 55
+                BClass = "Affiliated Bond CMBS / ABS"
+            Case 56 To 83
+                BClass = "Total Amount"
+            Case Else
+                BClass = "Illegal line number!"
+        End Select
+    End If
+End Function
+'''Public Function iruBondType(OpParm As Integer, Optional OrigCUSIP As String) As Variant
+'''' This will be located in Azar's personal macro sheet.
+'''' Based on a given CUSIP, function will return a bond type, bond sub type,
+'''' Description, SIC Code, and/or whether SIC Code is unique
+'''
+''''Parm Values: (all require full CUSIP)
+''''   1 - Return Bond Type Code based on full CUSIP
+''''   2 - Return Bond Sub Type Code
+''''   3 - Return SIC Code
+''''   4 - Return Description
+'''
+'''Const ProvideMsgs = 0 'should there be message boxes for error messages, or just return to error codes to the cell?
+'''Const ProbCharA = "#"
+'''Const ProbCharB = "*"
+'''Const ProbCharC = "@"
+'''Const ReplaceA = "¼"
+'''Const ReplaceB = "½"
+'''Const ReplaceC = "¾"
+'''Const RefFileName = "SICCODES-2010.XLS" 'Be sure to use ALL CAPS!!!
+'''
+'''
+'''Const MyCUSIPRange = "a2:a24001" ' My ISSUE = full cusip
+'''Const BondTypeRange = "b2:b24001"
+'''Const BondSubTypeRange = "c2:c24001"
+'''Const DescriptionRange = "d2:d24001"
+'''Const SICCodeRange = "e2:e24001"
+'''Const MyIssuerRange = "f2:f24001"
+'''
+'''Const Lo1 = "000333AA"
+'''Const Hi1 = "16104PDF"
+'''Const Lo2 = "161069TV"
+'''Const Hi2 = "31368HW6"
+'''Const Lo3 = "31368HWP"
+'''Const Hi3 = "45188R2G"
+'''Const Lo4 = "45188R2H"
+'''Const Hi4 = "57643GAH"
+'''Const Lo5 = "57643LAE"
+'''Const Hi5 = "683234YL"
+'''Const Lo6 = "683234YM"
+'''Const Hi6 = "849137AN"
+'''Const Lo7 = "849137AP"
+'''Const Hi7 = "ZZ206338"
+'''
+'''Dim MyWorkBook As Workbook
+'''Dim CFWorkBook As Workbook
+'''Dim DataSheetName As String
+'''Dim MyCUSIP As String
+'''Dim MyIssuer As String
+'''Dim UseJustIssuer As Boolean
+'''Dim TrickChar1 As String
+'''Dim R1 As Range
+'''Dim R2 As Range
+'''Dim vReturnCode As Variant
+'''Dim Cntr As Byte
+'''
+'''On Error GoTo CheckError
+'''
+'''UseJustIssuer = False
+'''If OpParm = 3 Then UseJustIssuer = True
+'''
+''''send parameter help if opParm is nonsense
+'''If OpParm <> 1 And OpParm <> 2 And OpParm <> 3 And OpParm <> 4 Then 'Illegal OpParm
+'''    iruBondType = "iruBondType(#,CUSIP) 1-Bd Type,2-SubType,3-SIC Code"
+'''    GoTo ExitRamp ' Exit Function
+'''End If
+'''
+'''If Len(OrigCUSIP) = 9 Then 'shorten to 8 characters
+'''    OrigCUSIP = Left(OrigCUSIP, 8)
+'''ElseIf Len(OrigCUSIP) <> 8 Then
+'''    iruBondType = "Bad Cusip: '" & OrigCUSIP & "'"
+'''    GoTo ExitRamp ' Exit Function
+'''End If
+'''
+''''Create MyCusip using the "regular" Cusip (which includes "*","#", and "@"-characters which mess up the "Match" function
+'''    MyCUSIP = Left(OrigCUSIP, 5)
+'''    For Cntr = 6 To 8
+'''        TrickChar1 = Right(Left(OrigCUSIP, Cntr), 1)
+'''        If TrickChar1 = ProbCharA Then
+'''            MyCUSIP = MyCUSIP & ReplaceA
+'''        ElseIf TrickChar1 = ProbCharB Then
+'''            MyCUSIP = MyCUSIP & ReplaceB
+'''        ElseIf TrickChar1 = ProbCharC Then
+'''            MyCUSIP = MyCUSIP & ReplaceC
+'''        Else
+'''            MyCUSIP = MyCUSIP & TrickChar1
+'''        End If
+'''    Next Cntr
+'''    MyIssuer = Mid(MyCUSIP, 1, 6)
+'''
+'''Set MyWorkBook = ActiveWorkbook
+'''
+'''For Cntr = 1 To Workbooks.Count 'cycle through all open workbooks to get to the reference data workbook
+'''    If UCase(Workbooks(Cntr).name) = RefFileName Then
+'''        Set CFWorkBook = Workbooks(Cntr)
+'''        Exit For
+'''    End If
+'''Next Cntr
+'''
+'''If CFWorkBook Is Nothing Then 'open the file!
+'''    vReturnCode = "Be sure that the " & RefFileName & " file is open before proceeding!"
+'''    If ProvideMsgs Then
+'''        MsgBox vReturnCode
+'''    Else
+'''        iruBondType = vReturnCode
+'''    End If
+'''    GoTo ExitRamp 'Exit Function
+'''End If
+''''switch workbooks
+'''CFWorkBook.Activate
+'''
+''''figure out which sheet to search - Look for MyIssuer First
+'''If MyIssuer < Left(Lo1, 6) Or MyIssuer > Left(Hi7, 6) Then
+'''    MsgBox "This CUSIP is outside our range!"
+'''    GoTo ExitRamp
+'''End If
+'''If MyIssuer >= Left(Lo1, 6) And MyIssuer <= Left(Hi1, 6) Then
+'''    DataSheetName = "B1"
+'''ElseIf MyIssuer >= Left(Lo2, 6) And MyIssuer <= Left(Hi2, 6) Then
+'''    DataSheetName = "B2"
+'''ElseIf MyIssuer >= Left(Lo3, 6) And MyIssuer <= Left(Hi3, 6) Then
+'''    DataSheetName = "B3"
+'''ElseIf MyIssuer >= Left(Lo4, 6) And MyIssuer <= Left(Hi4, 6) Then
+'''    DataSheetName = "B4"
+'''ElseIf MyIssuer >= Left(Lo5, 6) And MyIssuer <= Left(Hi5, 6) Then
+'''    DataSheetName = "B5"
+'''ElseIf MyIssuer >= Left(Lo6, 6) And MyIssuer <= Left(Hi6, 6) Then
+'''    DataSheetName = "B6"
+'''Else
+'''    DataSheetName = "B7"
+'''End If
+''''look up the bond type first using just the issuer
+'''Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyIssuerRange)
+'''Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+'''vReturnCode = Application.WorksheetFunction.Match(MyIssuer, R1, 0)
+'''iruBondType = R2.Cells(CLng(vReturnCode), 1)
+'''
+'''If (iruBondType <> 6 And iruBondType <> 7 And iruBondType <> 9) Or UseJustIssuer Then 'only an issuer search is necessary!
+'''    If OpParm = 1 Then
+'''        GoTo ExitRamp ' the work here is done!
+'''    ElseIf OpParm = 2 Then 'for bond sub types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+'''    ElseIf OpParm = 4 Then ' for bond description
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+'''    ElseIf OpParm = 3 Then ' for SIC Code - NB: This is not terribly robust / accurate info
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+'''    End If
+'''    'call up the relevant row
+'''    'vReturnCode = Application.WorksheetFunction.Match(MyIssuer, R1, 0)
+'''    iruBondType = R2.Cells(CLng(vReturnCode), 1)
+'''    GoTo ExitRamp
+'''Else ' better use the full CUSIP for bond types 6, 7, and 9. Better to find nothing than an inaccurate number
+'''
+'''    If MyCUSIP < Lo1 Or MyCUSIP > Hi7 Then
+'''        MsgBox "This CUSIP is outside our range!"
+'''        GoTo ExitRamp
+'''    End If
+'''    If MyCUSIP >= Lo1 And MyCUSIP <= Hi1 Then
+'''        DataSheetName = "B1"
+'''    ElseIf MyCUSIP >= Lo2 And MyCUSIP <= Hi2 Then
+'''        DataSheetName = "B2"
+'''    ElseIf MyCUSIP >= Lo3 And MyCUSIP <= Hi3 Then
+'''        DataSheetName = "B3"
+'''    ElseIf MyCUSIP >= Lo4 And MyCUSIP <= Hi4 Then
+'''        DataSheetName = "B4"
+'''    ElseIf MyCUSIP >= Lo5 And MyCUSIP <= Hi5 Then
+'''        DataSheetName = "B5"
+'''    ElseIf MyCUSIP >= Lo6 And MyCUSIP <= Hi6 Then
+'''        DataSheetName = "B6"
+'''    Else
+'''        DataSheetName = "B7"
+'''    End If
+'''
+'''    'figure out which range is needed
+'''    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyCUSIPRange)
+'''    If OpParm = 1 Then 'for bond types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+'''    ElseIf OpParm = 2 Then 'for bond sub types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+'''    ElseIf OpParm = 4 Then ' for bond description
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+'''    ElseIf OpParm = 3 Then ' for SIC Code
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+'''    End If
+'''
+'''    'Search the range
+'''    vReturnCode = Application.WorksheetFunction.Match(MyCUSIP, R1, 0)
+'''    iruBondType = R2.Cells(CLng(vReturnCode), 1)
+'''
+'''    GoTo ExitRamp
+'''End If
+'''CheckError:
+'''
+'''    If ProvideMsgs Then MsgBox "CUSIP '" & OrigCUSIP & "' Err #:" & Err & ", " & Error(Err)
+'''
+'''    iruBondType = ""
+'''
+'''ExitRamp:
+'''MyWorkBook.Activate
+'''Set R1 = Nothing
+'''Set R2 = Nothing
+'''LastExit:
+'''Set MyWorkBook = Nothing
+'''Set CFWorkBook = Nothing
+'''End Function
+'''Public Function iruBondType2(OpParm As Integer, Optional OrigCUSIP As String) As Variant
+'''' This will be located in Azar's personal macro sheet.
+'''' Based on a given CUSIP, function will return a bond type, bond sub type,
+'''' Description, SIC Code, and/or whether SIC Code is unique
+'''
+''''Parm Values: (all require full CUSIP)
+''''   1 - Return Bond Type Code based on full CUSIP
+''''   2 - Return Bond Sub Type Code
+''''   3 - Return SIC Code
+''''   4 - Return Description
+'''
+'''Const ProvideMsgs = 0 'should there be message boxes for error messages, or just return to error codes to the cell?
+'''Const ProbCharA = "#"
+'''Const ProbCharB = "*"
+'''Const ProbCharC = "@"
+'''Const ReplaceA = "¼"
+'''Const ReplaceB = "½"
+'''Const ReplaceC = "¾"
+'''Const RefFileName = "SICCODES-2010.XLS" 'Be sure to use ALL CAPS!!!
+'''
+'''
+'''Const MyCUSIPRange = "a2:a24001" ' My ISSUE = full cusip
+'''Const BondTypeRange = "b2:b24001"
+'''Const BondSubTypeRange = "c2:c24001"
+'''Const DescriptionRange = "d2:d24001"
+'''Const SICCodeRange = "e2:e24001"
+'''Const MyIssuerRange = "f2:f24001"
+'''
+'''Const Lo1 = "00000000"
+'''Const Hi1 = "ZZZZZZZZ"
+'''
+'''Dim MyWorkBook As Workbook
+'''Dim CFWorkBook As Workbook
+'''Dim DataSheetName As String
+'''Dim MyCUSIP As String
+'''Dim MyIssuer As String
+'''Dim UseJustIssuer As Boolean
+'''Dim TrickChar1 As String
+'''Dim R1 As Range
+'''Dim R2 As Range
+'''Dim vReturnCode As Variant
+'''Dim Cntr As Byte
+'''
+'''On Error GoTo CheckError
+'''
+'''UseJustIssuer = False
+'''If OpParm = 3 Then UseJustIssuer = True
+'''
+''''send parameter help if opParm is nonsense
+'''If OpParm <> 1 And OpParm <> 2 And OpParm <> 3 And OpParm <> 4 Then 'Illegal OpParm
+'''    iruBondType2 = "iruBondType2(#,CUSIP) 1-Bd Type,2-SubType,3-SIC Code"
+'''    GoTo ExitRamp ' Exit Function
+'''End If
+'''
+'''If Len(OrigCUSIP) = 9 Then 'shorten to 8 characters
+'''    OrigCUSIP = Left(OrigCUSIP, 8)
+'''ElseIf Len(OrigCUSIP) <> 8 Then
+'''    iruBondType2 = "Bad Cusip: '" & OrigCUSIP & "'"
+'''    GoTo ExitRamp ' Exit Function
+'''End If
+'''
+''''Create MyCusip using the "regular" Cusip (which includes "*","#", and "@"-characters which mess up the "Match" function
+'''    MyCUSIP = Left(OrigCUSIP, 5)
+'''    For Cntr = 6 To 8
+'''        TrickChar1 = Right(Left(OrigCUSIP, Cntr), 1)
+'''        If TrickChar1 = ProbCharA Then
+'''            MyCUSIP = MyCUSIP & ReplaceA
+'''        ElseIf TrickChar1 = ProbCharB Then
+'''            MyCUSIP = MyCUSIP & ReplaceB
+'''        ElseIf TrickChar1 = ProbCharC Then
+'''            MyCUSIP = MyCUSIP & ReplaceC
+'''        Else
+'''            MyCUSIP = MyCUSIP & TrickChar1
+'''        End If
+'''    Next Cntr
+'''    MyIssuer = Mid(MyCUSIP, 1, 6)
+'''
+'''Set MyWorkBook = ActiveWorkbook
+'''
+'''For Cntr = 1 To Workbooks.Count 'cycle through all open workbooks to get to the reference data workbook
+'''    If UCase(Workbooks(Cntr).name) = RefFileName Then
+'''        Set CFWorkBook = Workbooks(Cntr)
+'''        Exit For
+'''    End If
+'''Next Cntr
+'''
+'''If CFWorkBook Is Nothing Then 'open the file!
+'''    vReturnCode = "Be sure that the " & RefFileName & " file is open before proceeding!"
+'''    If ProvideMsgs Then
+'''        MsgBox vReturnCode
+'''    Else
+'''        iruBondType2 = vReturnCode
+'''    End If
+'''    GoTo ExitRamp 'Exit Function
+'''End If
+''''switch workbooks
+'''CFWorkBook.Activate
+'''
+''''figure out which sheet to search - Look for MyIssuer First
+''''If MyIssuer < Left(Lo1, 6) Or MyIssuer > Left(Hi7, 6) Then
+''''    MsgBox "This CUSIP is outside our range!"
+''''    GoTo ExitRamp
+''''End If
+''''If MyIssuer >= Left(Lo1, 6) And MyIssuer <= Left(Hi1, 6) Then
+''''    DataSheetName = "B1"
+''''ElseIf MyIssuer >= Left(Lo2, 6) And MyIssuer <= Left(Hi2, 6) Then
+''''    DataSheetName = "B2"
+''''ElseIf MyIssuer >= Left(Lo3, 6) And MyIssuer <= Left(Hi3, 6) Then
+''''    DataSheetName = "B3"
+''''ElseIf MyIssuer >= Left(Lo4, 6) And MyIssuer <= Left(Hi4, 6) Then
+''''    DataSheetName = "B4"
+''''ElseIf MyIssuer >= Left(Lo5, 6) And MyIssuer <= Left(Hi5, 6) Then
+''''    DataSheetName = "B5"
+''''ElseIf MyIssuer >= Left(Lo6, 6) And MyIssuer <= Left(Hi6, 6) Then
+''''    DataSheetName = "B6"
+''''Else
+'''    DataSheetName = "B8"
+''''End If
+''''look up the bond type first using just the issuer
+'''Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyIssuerRange)
+'''Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+'''vReturnCode = Application.WorksheetFunction.Match(MyIssuer, R1, 0)
+'''iruBondType2 = R2.Cells(CLng(vReturnCode), 1)
+'''
+'''If (iruBondType2 <> 6 And iruBondType2 <> 7 And iruBondType2 <> 9) Or UseJustIssuer Then 'only an issuer search is necessary!
+'''    If OpParm = 1 Then
+'''        GoTo ExitRamp ' the work here is done!
+'''    ElseIf OpParm = 2 Then 'for bond sub types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+'''    ElseIf OpParm = 4 Then ' for bond description
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+'''    ElseIf OpParm = 3 Then ' for SIC Code - NB: This is not terribly robust / accurate info
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+'''    End If
+'''    'call up the relevant row
+'''    'vReturnCode = Application.WorksheetFunction.Match(MyIssuer, R1, 0)
+'''    iruBondType2 = R2.Cells(CLng(vReturnCode), 1)
+'''    GoTo ExitRamp
+'''Else ' better use the full CUSIP for bond types 6, 7, and 9. Better to find nothing than an inaccurate number
+'''
+''''    If MyCusip < Lo1 Or MyCusip > Hi7 Then
+''''        MsgBox "This CUSIP is outside our range!"
+''''        GoTo ExitRamp
+''''    End If
+''''    If MyCusip >= Lo1 And MyCusip <= Hi1 Then
+''''        DataSheetName = "B1"
+''''    ElseIf MyCusip >= Lo2 And MyCusip <= Hi2 Then
+''''        DataSheetName = "B2"
+''''    ElseIf MyCusip >= Lo3 And MyCusip <= Hi3 Then
+''''        DataSheetName = "B3"
+''''    ElseIf MyCusip >= Lo4 And MyCusip <= Hi4 Then
+''''        DataSheetName = "B4"
+''''    ElseIf MyCusip >= Lo5 And MyCusip <= Hi5 Then
+''''        DataSheetName = "B5"
+''''    ElseIf MyCusip >= Lo6 And MyCusip <= Hi6 Then
+''''        DataSheetName = "B6"
+''''    Else
+'''        DataSheetName = "B8"
+''''    End If
+'''
+'''    'figure out which range is needed
+'''    Set R1 = CFWorkBook.Worksheets(DataSheetName).Range(MyCUSIPRange)
+'''    If OpParm = 1 Then 'for bond types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondTypeRange)
+'''    ElseIf OpParm = 2 Then 'for bond sub types
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(BondSubTypeRange)
+'''    ElseIf OpParm = 4 Then ' for bond description
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(DescriptionRange)
+'''    ElseIf OpParm = 3 Then ' for SIC Code
+'''        Set R2 = CFWorkBook.Worksheets(DataSheetName).Range(SICCodeRange)
+'''    End If
+'''
+'''    'Search the range
+'''    vReturnCode = Application.WorksheetFunction.Match(MyCUSIP, R1, 0)
+'''    iruBondType2 = R2.Cells(CLng(vReturnCode), 1)
+'''
+'''    GoTo ExitRamp
+'''End If
+'''CheckError:
+'''
+'''    If ProvideMsgs Then MsgBox "CUSIP '" & OrigCUSIP & "' Err #:" & Err & ", " & Error(Err)
+'''
+'''    iruBondType2 = ""
+'''
+'''ExitRamp:
+'''MyWorkBook.Activate
+'''Set R1 = Nothing
+'''Set R2 = Nothing
+'''LastExit:
+'''Set MyWorkBook = Nothing
+'''Set CFWorkBook = Nothing
+'''End Function
+'''
+'''
+
+' ==============================================================================================================================
+'           MISCELLANEOUS UTILITIES
+' ==============================================================================================================================
+Option Explicit
+Private Const micVerboseSummary = 1
+Private Const micVerboseListAll = 2
+Sub GrabMyChart()
+'written 11/30/12 by cfahey
+'the goal of this macro is to fix on the first chart in the spreadsheet, or, if none exist, send an error message
+If Charts.Count = 0 Then
+    MsgBox "no charts in this sheet"
+Else
+    Charts(1).Activate
+End If
+End Sub
+'The following utilities take a cell, and return the first digit found if a number exists in the cell
+'according to Benford's Law, the number 1 should appear roughly 35% of the time, with each digit increase
+'corresponding to a concommitant decrease in frequency. Thus, the number 9 should be the least frequent first digit
+'This law is used in forensic accounting to detect fraud. (Inspired from LifeHacker article).
+'=
+'Possible Improvements:
+'  - Modify to run the functions against a Word document.  This will allow running against a 10-K,
+'    or a press release, or parts of same.
+'  - Bring into Access, and run against a given cocode.
+'  - Identify basic parameters, and develop a subroutine to segregate good or valid versus bad
+'    or questionable results.
+Function RegenCUSIP(MyNumber As Variant) As String
+MsgBox MyNumber
+End Function
+Function RatingChng(ipY1 As Variant, ipY2 As Variant) As String
+    ipY1 = UCase(Trim(ipY1))
+    ipY2 = UCase(Trim(ipY2))
+    If (ipY1 = 0 Or ipY1 = "NR" Or ipY1 = "WD" Or ipY1 = "WR" Or ipY1 = "PIF") And (ipY2 = 0 Or ipY2 = "NR" Or ipY2 = "WD" Or ipY2 = "WR" Or ipY2 = "PIF") Then
+        RatingChng = ""
+    ElseIf (ipY1 = 0 Or ipY1 = "NR" Or ipY1 = "WD" Or ipY1 = "WR" Or ipY1 = "PIF") And ipY2 <> 0 Then
+        RatingChng = "NEW" & "-" & ClassRating(CStr(ipY2))
+    ElseIf ipY1 <> 0 And (ipY2 = 0 Or ipY2 = "NR" Or ipY2 = "WD" Or ipY2 = "WR" Or ipY2 = "PIF") Then
+        RatingChng = ClassRating(CStr(ipY1)) & "-" & "WD"
+    ElseIf Left(ipY1, 4) = "VMIG" Or Left(ipY2, 4) = "VMIG" Then
+        RatingChng = ""
+    Else
+        RatingChng = ClassRating(CStr(ipY1)) & "-" & ClassRating(CStr(ipY2))
+    End If
+MyExit:
+End Function
+Function ClassRating(ipRtg As String) As String
+    If ipRtg = "" Or ipRtg = "0" Then GoTo MyExit
+    ClassRating = "PROB!"
+    ipRtg = UCase(TrimSpaces(ipRtg))
+    Select Case ipRtg
+        Case "AAA"
+            ClassRating = "AAA"
+        Case "AA+", "AA", "AA-", "AA1", "AA2", "AA3"
+            ClassRating = "AA"
+        Case "A+", "A", "A-", "A1", "A2", "A3"
+            ClassRating = "A"
+        Case "BBB", "BBB+", "BBB-", "BAA1", "BAA2", "BAA3", "BAA"
+            ClassRating = "BBB"
+        Case "BB+", "BB", "BB-", "BA1", "BA2", "BA3", "BA"
+            ClassRating = "BB"
+        Case "B+", "B", "B-", "B1", "B2", "B3"
+            ClassRating = "B"
+        Case "CCC+", "CCC", "CCC-", "CAA1", "CAA2", "CAA3", "CAA"
+            ClassRating = "CCC"
+        Case "CC", "CA1", "CA2", "CA3", "CA"
+            ClassRating = "CC"
+        Case "C", "C1", "C2", "C3", "C+", "C-"
+            ClassRating = "C"
+        Case "D"
+            ClassRating = "D"
+        Case "VMIG 2", "VMIG 1", "P-1", "P-2", "P-3", "MIG 1", "MIG 2", "A1+"
+            ClassRating = "OTHER"
+        Case Else
+            ClassRating = "PROB!"
+    End Select
+MyExit:
+End Function
+
+Function MMKt(Md As String) As Byte
+Dim MyType As Byte
+Dim i As Integer
+Dim Sa() As String
+Dim Sb() As String
+Dim Sc() As String
+Dim Sd() As String
+Const seMax = 4
+Const saMax = 22
+Const sbMax = 7
+Const scMax = 14
+Const sdMax = 1
+    
+    On Error GoTo ErrorHandler
+    
+    MMKt = 0
+    ReDim Se(seMax)
+    Se(0) = "Comm pa"
+    Se(1) = "Comm Ba"
+    Se(2) = "Comm Dis"
+    Se(3) = "Comm Td"
+    Se(4) = "COMM BK"
+    
+    ReDim Sa(saMax)
+    For i = 0 To seMax
+        If InStr(1, UCase(Md), UCase(Se(i))) > 0 Then
+            MMKt = 0
+            GoTo MyExit
+        End If
+    Next i
+    
+    ReDim Sa(saMax)
+    Sa(0) = " MMF"
+    Sa(1) = "Money Market"
+    Sa(2) = " MMK"
+    Sa(3) = " MM Fund"
+    Sa(4) = " MMA"
+    Sa(5) = " MM Account"
+    Sa(6) = " Money Fund"
+    Sa(7) = " MMK-"
+    Sa(8) = " Money MKT"
+    Sa(9) = " M MKT"
+    Sa(10) = " mny mkt fd"
+    Sa(11) = " MM"
+    Sa(12) = " mny mkt  fd"
+    Sa(13) = " prime mny fd"
+    Sa(14) = " mon mkt"
+    Sa(15) = " mmd"
+    Sa(16) = " money mark"
+    Sa(17) = " advmoney market fun"
+    Sa(18) = " money-maket"
+    Sa(19) = "-mm fund"
+    Sa(20) = " instl money tr"
+    Sa(21) = " government money m"
+    Sa(22) = "mm "
+'    Sa(23) = ""
+'    Sa(24) = ""
+'    Sa(25) = ""
+'    Sa(26) = ""
+'    Sa(27) = ""
+'    Sa(28) = ""
+'    Sa(29) = ""
+'    Sa(30) = ""
+'    Sa(31) = ""
+'    Sa(32) = ""
+'    Sa(33) = ""
+'    Sa(34) = ""
+'    Sa(35) = ""
+'    Sa(36) = ""
+'    Sa(37) = ""
+'    Sa(38) = ""
+'    Sa(39) = ""
+    
+
+    For i = 0 To saMax
+        If InStr(1, UCase(Md), UCase(Sa(i))) > 0 Then
+            MMKt = 1
+            GoTo MyExit
+        End If
+    Next i
+    
+    ReDim Sb(sbMax)
+    Sb(0) = " LIQUIDITY POOL"
+    Sb(1) = " liquidity fu"
+    Sb(2) = " liquid deposit acc"
+    Sb(3) = " liquidity fds"
+    Sb(4) = " liquidity f "
+    Sb(5) = "short term invested cash"
+    Sb(6) = "liquid fun"
+    Sb(7) = "liquid asse"
+'    Sb(8) = ""
+'    Sb(9) = ""
+'    Sb(10) = ""
+'    Sb(11) = ""
+'    Sb(12) = ""
+'    Sb(13) = ""
+'    Sb(14) = ""
+'    Sb(15) = ""
+'    Sb(16) = ""
+'    Sb(17) = ""
+'    Sb(18) = ""
+'    Sb(19) = ""
+    
+    For i = 0 To sbMax
+        If InStr(1, UCase(Md), UCase(Sb(i))) > 0 Then
+            MMKt = 2
+            GoTo MyExit
+        End If
+    Next i
+    
+    ReDim Sc(scMax)
+    Sc(0) = " CASH MGMT"
+    Sc(1) = " CASH ADVANTAGE"
+    Sc(2) = " cash managemen"
+    Sc(3) = " ultrashort inst"
+    Sc(4) = " cash sweep"
+    Sc(5) = " cash reser"
+    Sc(6) = " cash acc"
+    Sc(7) = " instit cash reser"
+    Sc(8) = " sweep"
+    Sc(9) = " cash money"
+    Sc(10) = " cash on account"
+    Sc(11) = " cash eq"
+    Sc(12) = " cash invest"
+    Sc(13) = " prime cash "
+    Sc(14) = " temp cash "
+'    Sc(15) = ""
+'    Sc(16) = ""
+'    Sc(17) = ""
+'    Sc(18) = ""
+'    Sc(19) = ""
+    
+    For i = 0 To scMax
+        If InStr(1, UCase(Md), UCase(Sc(i))) > 0 Then
+            MMKt = 3
+            GoTo MyExit
+        End If
+    Next i
+        
+'    ReDim Sd(sdMax)
+'    Sd(0) = "sweep"
+'    Sd(1) = ""
+'    Sd(2) = ""
+'    Sd(3) = ""
+'    Sd(4) = ""
+'    Sd(5) = ""
+'    Sd(6) = ""
+'    Sd(7) = ""
+'    Sd(8) = ""
+'    Sd(9) = ""
+'    Sd(10) = ""
+'    Sd(11) = ""
+'    Sd(12) = ""
+'    Sd(13) = ""
+'    Sd(14) = ""
+'    Sd(15) = ""
+'    Sd(16) = ""
+'    Sd(17) = ""
+'    Sd(18) = ""
+'    Sd(19) = ""
+    
+'    For i = 0 To sdMax
+'        If InStr(1, UCase(Md), UCase(Sd(i))) > 0 Then
+'            MMKt = 4
+'            GoTo MyExit
+'        End If
+'    Next i
+'
+    GoTo MyExit
+ErrorHandler:
+       MsgBox "Error!!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+       Err.Clear
+
+MyExit:
+
+End Function
+Function BenfordLaw(MyRange As Range, MyDigit As String) As Long
+Dim RowCount As Long
+Dim i As Long
+Dim j As Long
+Dim k As Long
+Dim TestNum As String
+Dim ColCount As Long
+Dim TotCells As Long
+RowCount = MyRange.Rows.Count
+ColCount = MyRange.Columns.Count
+TotCells = RowCount * ColCount
+'MsgBox TotCells
+For i = 1 To ColCount
+    For j = 1 To RowCount
+        TestNum = FirstNumber(MyRange.Cells(j, i))
+        If Len(TestNum) = 0 Then
+         'there were no numbers found! Do nothing. . .
+        ElseIf Len(TestNum) = 1 Then
+            If TestNum = MyDigit Then BenfordLaw = BenfordLaw + 1
+        Else ' more than 1 number was returned
+            For k = 1 To Len(TestNum)
+                If Mid(TestNum, k) = MyDigit Then BenfordLaw = BenfordLaw + 1
+            Next k
+        End If
+    Next j
+Next i
+Set MyRange = Nothing ' dont know if you need to do this, but doing it anyway
+End Function
+Public Function Units(ipCellVal As Long, Optional ipFullName As Boolean = False) As String
+    If ipCellVal = 1 Then
+        Units = "($'s)"
+    ElseIf ipCellVal = 1000 Then
+        Units = "($000s)"
+    ElseIf ipCellVal = 10 ^ 6 Then '1000000 Then
+        If ipFullName = False Then
+            Units = "($mil)"
+        Else
+            Units = "($millions)"
+        End If
+    ElseIf ipCellVal = 10 ^ 9 Then '1000000000 Then
+        If ipFullName = False Then
+            Units = "($bil)"
+        Else
+            Units = "($billions)"
+        End If
+    Else
+        Units = "Parameter Misunderstood. Enter 1,1000,10^6, or 10^9."
+    End If
+End Function
+Public Function NAICRating(cellvalue As String) As Byte
+Dim strChar As String
+Dim i As Byte
+Dim NumberFound As Boolean
+NumberFound = False
+    strChar = Mid(cellvalue, 1, 1)
+    If cellvalue = "<>" Or cellvalue = "-" Or cellvalue = "n_a_" Then
+        NAICRating = 0
+        NumberFound = True
+        GoTo ExitRamp
+    ElseIf IsNumeric(strChar) Then  'this is an ordinary NAIC rating
+        NAICRating = strChar
+        NumberFound = True
+    Else 'this is a preferred rating
+        For i = 1 To Len(cellvalue)
+            strChar = Mid(cellvalue, i, 1)
+            If IsNumeric(strChar) Then
+                NAICRating = strChar
+                NumberFound = True
+                Exit For
+            End If
+        Next i
+    End If
+ExitRamp:
+    If Not NumberFound Then
+        NAICRating = 255
+    End If
+End Function
+Function FirstNumber(cellvalue As String) As String
+Dim CurStr As String
+Dim i As Byte 'number of first numbers
+Dim j As Integer 'length of cell string
+Dim MyOffset As Integer
+Dim MyEndOffset As Integer
+MyOffset = FindNumber(cellvalue)
+If MyOffset = 0 Then 'no numbers found! do nothing
+    Exit Function
+Else 'process the remaining numbers in the string
+    FirstNumber = Mid(cellvalue, MyOffset, 1) 'save the first number found!
+    MyEndOffset = FindNumberEnd(Mid(cellvalue, MyOffset, Len(cellvalue) - MyOffset))
+    CurStr = Mid(cellvalue, MyOffset + MyEndOffset, Len(cellvalue) - MyOffset - MyEndOffset) 'trim off number already found
+    MyOffset = FindNumber(CurStr)
+    Do While MyOffset > 0 And MyEndOffset <> 0
+        MyEndOffset = FindNumberEnd(Mid(CurStr, MyOffset))
+        FirstNumber = FirstNumber & "," & Mid(CurStr, MyOffset, 1) ' save the first character in the number
+        CurStr = Mid(CurStr, MyOffset + MyEndOffset)
+        MyOffset = FindNumber(CurStr)
+    Loop 'While FindNumber(CurStr) > 0
+End If
+End Function
+Function FindNumber(MyStr As String) As Byte
+Dim i As Integer
+Dim MyChar As String
+Dim FoundNum As Boolean
+FoundNum = False
+For i = 1 To Len(MyStr)
+    MyChar = Mid(MyStr, i, 1)
+    If MyChar = "1" Or MyChar = "2" Or MyChar = "3" Or MyChar = "4" Or MyChar = "5" Or MyChar = "6" Or MyChar = "7" Or MyChar = "8" Or MyChar = "9" Then
+        FoundNum = True
+        Exit For
+    End If
+Next i
+If FoundNum = True Then FindNumber = i
+End Function
+Function FindNumberEnd(MyStr As String) As Byte
+Dim i As Integer
+Dim MyChar As String
+Dim FoundEnd As Boolean
+FoundEnd = False
+For i = 1 To Len(MyStr)
+    MyChar = Mid(MyStr, i, 1)
+    If MyChar <> "$" And MyChar <> " " And MyChar <> ")" And MyChar <> "." And MyChar <> "," And MyChar <> "," And MyChar <> "0" And MyChar <> "1" And MyChar <> "2" And MyChar <> "3" And MyChar <> "4" And MyChar <> "5" And MyChar <> "6" And MyChar <> "7" And MyChar <> "8" And MyChar <> "9" Then
+        FoundEnd = True
+        Exit For
+    End If
+Next i
+If FoundEnd Then FindNumberEnd = i
+End Function
+Function NextPrime(LastPrime As Long) As Long
+Dim PrimeFound As Boolean
+Dim NumIsPrime As Boolean
+Dim SqrRoot As Double
+Dim PriorPrimes() As Long
+Dim ModResult As Long
+Dim i As Long
+PrimeFound = False
+If LastPrime <= 0 Then
+    NextPrime = 1
+ElseIf LastPrime = 1 Then
+    NextPrime = 2
+ElseIf LastPrime = 2 Then
+    NextPrime = 3
+ElseIf LastPrime = 3 Then
+    NextPrime = 5
+Else
+    'first, check to see that the LastPrime is, indeed, prime
+    SqrRoot = Sqr(LastPrime)
+    SqrRoot = Round(SqrRoot + 1, 0)
+    For i = 2 To SqrRoot
+        NextPrime = LastPrime Mod i
+        If NextPrime = 0 Then
+            NextPrime = -1
+            Exit For
+        End If
+    Next i
+    If NextPrime = -1 Then 'the number wasn't prime
+    Else 'now comes the meat of the function!
+        NextPrime = LastPrime
+        Do
+            NumIsPrime = True
+            NextPrime = NextPrime + 2
+            SqrRoot = Round(Sqr(NextPrime), 0) + 1
+            'is nextprime prime?
+            For i = 2 To SqrRoot
+                ModResult = NextPrime Mod i
+                If ModResult = 0 Then 'i divided evenly into nextprime!
+                    NumIsPrime = False
+                    Exit For 'there's a remainder, so nextprime isn't prime
+                End If
+            Next i
+            If NumIsPrime Then Exit Do
+        Loop While PrimeFound = False
+    End If
+End If
+End Function
+
+Function MultiProduct(Flags As Range, Values As Range) As Variant
+'assume the first range determines whether to multiply, the second is the value to multiply
+Dim Count1 As Long
+Dim Count2 As Long
+Dim i, j As Long
+Dim Rows1, Rows2, Cols1, Cols2 As Long
+Dim Hor1 As Boolean
+Dim Hor2 As Boolean
+Rows1 = Flags.Rows.Count
+Rows2 = Values.Rows.Count
+Cols1 = Flags.Columns.Count
+Cols2 = Values.Columns.Count
+MultiProduct = 0
+For i = 1 To Rows1
+    For j = 1 To Cols1
+        If Flags(i, j).Value <> 0 Then
+            If MultiProduct = 0 Then
+                MultiProduct = Values(i, j).Value
+            Else
+                MultiProduct = MultiProduct * Values(i, j).Value
+            End If
+        End If
+    Next j
+Next i
+End Function
+
+Function LevClass(MyLeverage As Double, LevRange As Range, MyVector As Range) As Variant ', Optional OrderType As Byte = 0
+'ordertype = 0 means that leverage grows from lowest to highest, so stop once myleverage value is exceeded by the value in the range
+'ordertype = 1 means that leverage falls from highest to lowest, so stop once myleverage value is below value in the range
+Dim i As Byte
+Dim RowCnt As Byte
+Dim MaxValue As Variant
+Dim MinValue As Variant
+Const ERRORCODE = 255
+RowCnt = LevRange.Rows.Count
+'MinValue = LevRange.Cells(0, 0).Value2
+'MaxValue = LevRange.Cells(RowCnt, 0).Value2
+If MyVector.Rows.Count <> RowCnt Then 'there is a mismatch in the rows of each range!
+    LevClass = ERRORCODE
+ElseIf MyLeverage < LevRange.Cells(1, 1).Value Or MyLeverage > LevRange.Cells(RowCnt, 1).Value Then
+    LevClass = ERRORCODE 'leverage offered is outside the range of the grid
+Else
+    For i = 1 To LevRange.Rows.Count
+        'stop once the leverage exceeds the value in the vector
+ '       If OrderType = 0 Then 'this is the default - leverage increases as you go down the list
+            If MyLeverage < LevRange.Cells(i, 1).Value Then
+                i = i - 1
+                Exit For
+            End If
+'        Else
+'            If MyLeverage > LevRange(i, 0) Then
+'                i = i - 1
+'                Exit For
+'            End If
+'        End If
+    Next i
+    LevClass = MyVector.Cells(i, 1).Value
+End If
+End Function
+
+Public Function CountLines(Optional iVerboseLevel As Integer = 3) As Long
+On Error GoTo Err_Handler
+    'Purpose:   Count the number of lines of code in modules of current database.
+    'Requires:  Access 2000 or later.
+    'Argument:  This number is a bit field, indicating what should print to the Immediate Window:
+    '               0 displays nothing
+    '               1 displays a summary for the module type (form, report, stand-alone.)
+    '               2 list the lines in each module
+    '               3 displays the summary and the list of modules.
+    'Notes:     Code will error if dirty (i.e. the project is not compiled and saved.)
+    '           Just click Ok if a form/report is assigned to a non-existent printer.
+    '           Side effect: all modules behind forms and reports will be closed.
+    '           Code window will flash, since modules cannot be opened hidden.
+    Dim accObj As AccessObject  'Each module/form/report.
+    Dim strDoc As String        'Name of each form/report
+    Dim lngObjectCount As Long  'Number of modules/forms/reports
+    Dim lngObjectTotal As Long  'Total number of objects.
+    Dim lngLineCount As Long    'Number of lines for this object type.
+    Dim lngLineTotal As Long    'Total number of lines for all object types.
+    Dim bWasOpen As Boolean     'Flag to leave form/report open if it was open.
+    
+    'Stand-alone modules.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllModules
+        'OPTIONAL: TO EXCLUDE THE CODE IN THIS MODULE FROM THE COUNT:
+        '  a) Uncomment the If ... and End If lines (3 lines later), by removing the single-quote.
+        '  b) Replace MODULE_NAME with the name of the module you saved this in (e.g. "Module1")
+        '  c) Check that the code compiles after your changes (Compile on Debug menu.)
+        'If accObj.Name <> "MODULE_NAME" Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines(accObj.Name, True, iVerboseLevel)
+        'End If
+
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " stand-alone module(s)"
+        Debug.Print
+    End If
+    
+    'Modules behind forms.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllForms
+        strDoc = accObj.Name
+        bWasOpen = accObj.IsLoaded
+        If Not bWasOpen Then
+            DoCmd.OpenForm strDoc, acDesign, WindowMode:=acHidden
+        End If
+        If Forms(strDoc).HasModule Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines("Form_" & strDoc, False, iVerboseLevel)
+        End If
+        If Not bWasOpen Then
+            DoCmd.Close acForm, strDoc, acSaveNo
+        End If
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " module(s) behind forms"
+        Debug.Print
+    End If
+    
+    'Modules behind reports.
+    lngObjectCount = 0&
+    lngLineCount = 0&
+    For Each accObj In CurrentProject.AllReports
+        strDoc = accObj.Name
+        bWasOpen = accObj.IsLoaded
+        If Not bWasOpen Then
+            'In Access 2000, remove the ", WindowMode:=acHidden" from the next line.
+            DoCmd.OpenReport strDoc, acDesign, WindowMode:=acHidden
+        End If
+        If Reports(strDoc).HasModule Then
+            lngObjectCount = lngObjectCount + 1&
+            lngLineCount = lngLineCount + GetModuleLines("Report_" & strDoc, False, iVerboseLevel)
+        End If
+        If Not bWasOpen Then
+            DoCmd.Close acReport, strDoc, acSaveNo
+        End If
+    Next
+    lngLineTotal = lngLineTotal + lngLineCount
+    lngObjectTotal = lngObjectTotal + lngObjectCount
+    If (iVerboseLevel And micVerboseSummary) <> 0 Then
+        Debug.Print lngLineCount & " line(s) in " & lngObjectCount & " module(s) behind reports"
+        Debug.Print lngLineTotal & " line(s) in " & lngObjectTotal & " module(s)"
+    End If
+        
+    CountLines = lngLineTotal
+    
+Exit_Handler:
+    Exit Function
+    
+Err_Handler:
+    Select Case Err.Number
+    Case 29068&     'This error actually occurs in GetModuleLines()
+        MsgBox "Cannot complete operation." & vbCrLf & "Make sure code is compiled and saved."
+    Case Else
+        MsgBox "Error " & Err.Number & ": " & Err.Description
+    End Select
+    Resume Exit_Handler
+End Function
+
+Private Function GetModuleLines(strModule As String, bIsStandAlone As Boolean, iVerboseLevel As Integer) As Long
+    'Usage:     Called by CountLines().
+    'Note:      Do not use error handling: must pass error back to parent routine.
+    Dim bWasOpen As Boolean     'Flag applies to standalone modules only.
+    
+    If bIsStandAlone Then
+        bWasOpen = CurrentProject.AllModules(strModule).IsLoaded
+    End If
+    If Not bWasOpen Then
+        DoCmd.OpenModule strModule
+    End If
+    If (iVerboseLevel And micVerboseListAll) <> 0 Then
+        Debug.Print Modules(strModule).CountOfLines, strModule
+    End If
+    GetModuleLines = Modules(strModule).CountOfLines
+    If Not bWasOpen Then
+        DoCmd.Close acModule, strModule, acSaveYes
+    End If
+End Function
+
+Function CellID(ByRef ipAddr As String, Optional ipPtr As Byte = 0) As String
+On Error GoTo ErrHandler:
+'this receives an address, such as B10 or C15:AB25
+'It will return either the column or row, of either the first or
+' the second cell address.
+'  0 or 1 => first (or only) column
+'    2    => first (or only) row
+'    3    => second column
+'    4    => second row
+'
+'addresses can be $B10, $b$10, b$10, b10:c25, or any permutation thereof
+'one function will be to remove the $ characters
+Dim CleanAddr As String
+Dim CurChar As String
+Dim TopRow As String
+Dim BottomRow As String
+Dim LeftCol As String
+Dim RightCol As String
+Dim CleanCol As String
+Dim CleanRow As String
+Dim Ptr As Integer
+Dim i As Integer
+Dim FirstDone As Boolean
+    
+    ipAddr = UCase(ipAddr)
+    Ptr = InStr(1, ipAddr, ":")
+    If Ptr = 0 And ipPtr > 2 Then 'there's a single address, inconsistent with the function request
+        CellID = "-1"
+        GoTo MyExit
+    Else
+        FirstDone = False
+        For i = 1 To Len(ipAddr)
+            CurChar = Mid(ipAddr, i, 1)
+            If CurChar <> "$" Then
+                If CurChar = ":" Then
+                    If ipPtr = 0 Or ipPtr = 1 Then
+                        CellID = CleanCol
+                        GoTo MyExit
+                    Else
+                        If ipPtr = 2 Then
+                            CellID = CleanRow
+                            GoTo MyExit
+                        Else
+                            CleanCol = ""
+                            CleanRow = ""
+                        End If
+                    End If
+                Else
+                    If Asc(CurChar) > 47 And Asc(CurChar) < 58 Then 'its a number
+                        CleanRow = CleanRow + CurChar
+                    Else
+                        If Asc(CurChar) > 64 And Asc(CurChar) < 91 Then 'it's a proper column identifier
+                            CleanCol = CleanCol + CurChar
+                        Else
+                            CellID = "-1"
+                            GoTo MyExit
+                        End If
+                    End If
+                End If
+            End If
+        Next i
+        If ipPtr = 0 Or ipPtr = 1 Or ipPtr = 3 Then
+            CellID = CleanCol
+        End If
+        If ipPtr = 2 Or ipPtr = 4 Then
+            CellID = CleanRow
+        End If
+    End If
+    GoTo MyExit
+
+ErrHandler:
+    MsgBox "Err# " & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Err# " & Err.Number & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+End Function
+' ==============================================================================================================================
+'           MODULE 1
+' ==============================================================================================================================
+Option Explicit
+ 
+'Sub Testing1234()
+'Dim MySheet As Excel.Worksheet
+'
+'    Set MySheet = Sheets(ASS)
+'    mysheet.Tab.Color = '
+'
+'End Sub
+Sub TestListFolders()
+     
+    Application.ScreenUpdating = False
+     
+     'create a new workbook for the folder list
+     
+     'commented out by dr
+     'Workbooks.Add
+     
+     'line added by dr to clear old data
+    Cells.Delete
+     
+     ' add headers
+    With Range("A1")
+        .Formula = "Folder contents:"
+        .Font.Bold = True
+        .Font.size = 12
+    End With
+     
+    Range("A3").Formula = "Folder Path:"
+    Range("B3").Formula = "Folder Name:"
+    Range("C3").Formula = "Size:"
+    Range("D3").Formula = "Subfolders:"
+    Range("E3").Formula = "Files:"
+    Range("F3").Formula = "Short Name:"
+    Range("G3").Formula = "Short Path:"
+    Range("A3:G3").Font.Bold = True
+     
+     'ENTER START FOLDER HERE
+     ' and include subfolders (true/false)
+    ListFolders "C:\Data", True
+     
+    Application.ScreenUpdating = True
+     
+End Sub
+ 
+Sub ListFolders(SourceFolderName As String, IncludeSubfolders As Boolean)
+     ' lists information about the folders in SourceFolder
+     ' example: ListFolders "C:\data", True
+    Dim FSO As Scripting.FileSystemObject
+    Dim SourceFolder As Scripting.Folder, SubFolder As Scripting.Folder
+    Dim r As Long
+     
+    Set FSO = New Scripting.FileSystemObject
+    Set SourceFolder = FSO.GetFolder(SourceFolderName)
+     
+     'line added by dr for repeated "Permission Denied" errors
+     
+    On Error Resume Next
+     
+     ' display folder properties
+    r = Range("A65536").End(xlUp).row + 1
+    Cells(r, 1).Formula = SourceFolder.Path
+    Cells(r, 2).Formula = SourceFolder.Name
+    Cells(r, 3).Formula = SourceFolder.size
+    Cells(r, 4).Formula = SourceFolder.SubFolders.Count
+    Cells(r, 5).Formula = SourceFolder.Files.Count
+    Cells(r, 6).Formula = SourceFolder.ShortName
+    Cells(r, 7).Formula = SourceFolder.ShortPath
+    If IncludeSubfolders Then
+        For Each SubFolder In SourceFolder.SubFolders
+            ListFolders SubFolder.Path, True
+        Next SubFolder
+        Set SubFolder = Nothing
+    End If
+     
+    Columns("A:G").AutoFit
+     
+    Set SourceFolder = Nothing
+    Set FSO = Nothing
+     
+     'commented out by dr
+     'ActiveWorkbook.Saved = True
+     
+End Sub
+
+' ==============================================================================================================================
+'           MY OS UTILS
+' ==============================================================================================================================
+Option Explicit
+ 
+'Sub Testing1234()
+'Dim MySheet As Excel.Worksheet
+'
+'    Set MySheet = Sheets(ASS)
+'    mysheet.Tab.Color = '
+'
+'End Sub
+Sub TestListFolders()
+     
+    Application.ScreenUpdating = False
+     
+     'create a new workbook for the folder list
+     
+     'commented out by dr
+     'Workbooks.Add
+     
+     'line added by dr to clear old data
+    Cells.Delete
+     
+     ' add headers
+    With Range("A1")
+        .Formula = "Folder contents:"
+        .Font.Bold = True
+        .Font.size = 12
+    End With
+     
+    Range("A3").Formula = "Folder Path:"
+    Range("B3").Formula = "Folder Name:"
+    Range("C3").Formula = "Size:"
+    Range("D3").Formula = "Subfolders:"
+    Range("E3").Formula = "Files:"
+    Range("F3").Formula = "Short Name:"
+    Range("G3").Formula = "Short Path:"
+    Range("A3:G3").Font.Bold = True
+     
+     'ENTER START FOLDER HERE
+     ' and include subfolders (true/false)
+    ListFolders "C:\Data", True
+     
+    Application.ScreenUpdating = True
+     
+End Sub
+ 
+Sub ListFolders(SourceFolderName As String, IncludeSubfolders As Boolean)
+     ' lists information about the folders in SourceFolder
+     ' example: ListFolders "C:\data", True
+    Dim FSO As Scripting.FileSystemObject
+    Dim SourceFolder As Scripting.Folder, SubFolder As Scripting.Folder
+    Dim r As Long
+     
+    Set FSO = New Scripting.FileSystemObject
+    Set SourceFolder = FSO.GetFolder(SourceFolderName)
+     
+     'line added by dr for repeated "Permission Denied" errors
+     
+    On Error Resume Next
+     
+     ' display folder properties
+    r = Range("A65536").End(xlUp).row + 1
+    Cells(r, 1).Formula = SourceFolder.Path
+    Cells(r, 2).Formula = SourceFolder.Name
+    Cells(r, 3).Formula = SourceFolder.size
+    Cells(r, 4).Formula = SourceFolder.SubFolders.Count
+    Cells(r, 5).Formula = SourceFolder.Files.Count
+    Cells(r, 6).Formula = SourceFolder.ShortName
+    Cells(r, 7).Formula = SourceFolder.ShortPath
+    If IncludeSubfolders Then
+        For Each SubFolder In SourceFolder.SubFolders
+            ListFolders SubFolder.Path, True
+        Next SubFolder
+        Set SubFolder = Nothing
+    End If
+     
+    Columns("A:G").AutoFit
+     
+    Set SourceFolder = Nothing
+    Set FSO = Nothing
+     
+     'commented out by dr
+     'ActiveWorkbook.Saved = True
+     
+End Sub
+
+
+' ==============================================================================================================================
+'           TIMER FUNCTIONS
+' ==============================================================================================================================
+' Module level declaration of icount, inumberofcalls. This line
+' must be at the top of the module sheet
+Dim icount As Integer, inumberofcalls As Integer
+
+Sub StartOnTime()
+'run this macro!!!
+' Initialize icount to 1.
+icount = 1
+' Initialize inumberofcalls to 4.
+inumberofcalls = 4
+' Select the range of cells for formatting.
+Range("A2:A" & inumberofcalls + 1).Select
+' Format the selected cells as time.
+Selection.NumberFormat = "h:mm:ss AM/PM"
+' Start in cell A1.
+Range("A1").Select
+' Put the word "Time" in cell A1.
+ActiveCell.Value = "Time"
+' Start the OnTimeMacro.
+Call OnTimeMacro
+End Sub
+Sub OnTimeMacro()
+' Run the RunEvery5seconds macro inumberofcalls times.
+If icount <= inumberofcalls Then  ' Run the RunEvery5seconds macro in 5 seconds.
+    Application.OnTime Now + TimeValue("00:00:05"), _
+        "RunEvery5seconds"
+    ' Increment icount by 1.
+    icount = icount + 1
+Else ' Icount is greater than inumberofcalls, so exit the macro.
+    Exit Sub
+End If
+End Sub
+
+Sub RunEvery5seconds()
+' Places the current time in a cell.
+ActiveCell.Offset(icount - 1, 0).Value = Format(Now(), _
+    "hh:mm:ss")
+' Runs the OnTimeMacro again.
+Call OnTimeMacro
+End Sub
+'=====================================================================================================
+'   Below is another type of timer function, which records time differences accurately via API call
+'=====================================================================================================
+Sub test3()
+Dim i As Long
+Dim MyTime As Double
+Dim obTimer As New CHighResTimer
+obTimer.StartTimer
+For i = 1 To 100000
+Next i
+obTimer.StopTimer
+
+Debug.Print "10000 iterations took " & obTimer.Elapsed & " seconds"
+MyTime = obTimer.Elapsed
+MsgBox "Elapsed Time = " & Round(MyTime, 2) & " seconds or " & Round(MyTime / 60, 2) & " minutes."
+Set obTimer = Nothing
+End Sub
+
+' ==============================================================================================================================
+'           CLASS CHighResTimer
+' ==============================================================================================================================
+Option Explicit
+'the first few procs were taken from the Excel 2000 Programers Reference, by Wrox, and involves an API call
+'for more precise timing missions.  Normal resolution of a timer function is about 1 second.
+'how many times per secon is the counter updated?
+#If VBA7 Then
+    Private Declare PtrSafe Function QueryFrequency Lib "kernel32" Alias "QueryPerformanceFrequency" (lpFrequency As Currency) As Long
+    'what is teh counters value?
+    Private Declare PtrSafe Function QueryCounter Lib "kernel32" Alias "QueryPerformanceCounter" (lpPerformanceCount As Currency) As Long
+
+#Else
+    Private Declare Function QueryFrequency Lib "kernel32" Alias "QueryPerformanceFrequency" (lpFrequency As Currency) As Long
+    'what is teh counters value?
+    Private Declare Function QueryCounter Lib "kernel32" Alias "QueryPerformanceCounter" (lpPerformanceCount As Currency) As Long
+#End If
+'variables to store the counter information
+Dim cyFrequency As Currency
+Dim cyOverhead As Currency
+Dim cyStarted As Currency
+Dim cyStopped As Currency
+'the API Call itself takes some time to initialize.  For accurate timings, please consider this delay, found in the Initialize routine
+Private Sub Class_Initialize()
+    Dim cyCount1 As Currency, cyCount2 As Currency
+    'get the count freq
+    QueryFrequency cyFrequency
+    'call the high-res counter twice, to check how long it takes
+    QueryCounter cyCount1
+    QueryCounter cyCount2
+    'store the call overhead
+    cyOverhead = cyCount2 - cyCount1
+End Sub
+Public Sub StartTimer()
+'get the time that you started
+QueryCounter cyStarted
+End Sub
+Public Sub StopTimer()
+'get the time that you stoped
+QueryCounter cyStopped
+End Sub
+Public Property Get Elapsed() As Double
+Dim cyTimer As Currency
+'have you stopped or not?
+If cyStopped = 0 Then 'not stopped
+    QueryCounter cyTimer
+Else
+    cyTimer = cyStopped
+End If
+'if you have a frequency, return the duration, in seconds
+If cyFrequency > 0 Then
+    Elapsed = (cyTimer - cyStarted - cyOverhead) / cyFrequency
+End If
+End Property

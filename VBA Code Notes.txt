@@ -1,0 +1,53 @@
+
+
+                                      Summary Notes for VBA code in NAIC Specific VBA file 
+				  related to download of Insurance Company Information
+
+At one time the code in the VBA file worked. However, much time has passed so there are no guarantees with this VBA code.
+
+These documents can provide ideas and suggestions for using Excel and MS Access in situations where there is a lot of data 
+to review, synthesize, and analyze. Also, hopefully, this code, these functions, can facilitate data downloads and 
+data analysis. 
+
+NAIC Insurer Schedules (NAIC Specific VBA file): All regulatory schedule filings that were required for a review of a 
+given CoCode: Stock, preferred stock, cash, footnotes, debt, BA assets, derivatives, and other schedules which 
+were used to create our portfolio analysis memorandums (PAMs). Options at the time allowed for the 
+specification of a CoCode, whether headings were to be included in the download as the first row (allowing for a simple data dump), 
+whether the downloads were to instead use the PAM Excel workbook template (so that the columns all lined up, the summary tables 
+were automatically calculted, and the analysis spreadsheets were properly populated, allowing the user to jump immediately 
+to data analysis instead of gathering and properly formatting the data, and specification/restriction of just 
+current and/or prior years. 
+	  
+All/any tables containing data targeted for downloading must first have a MS Access "link" created without which the 
+Access VBA code cannot connect to the underlying data. These links needed to be created manually. There was no way to 
+automate the linking via VBA (to my knowledge). So any required MS Access links to ISite Oracle tables need to be in 
+place for this code to execute.
+   
+The NAIC allows two ways to reference any given table. "CY"-Table Name for the current year, "PY"-Table Name for 
+the prior year, "P3"-Table Name for the table 4 years back (I think), and alternatively the year desired, 
+i.e. 2006-Table Name.  I saw advantages in using the "CY" / "PY" format, in that it minimized year-over-year changes. 
+That was the convention I adopted. In retrospect, with the number of years that have passes, I now would have 
+been better off adopting the alternate convention. Such is life. 
+ 
+Because the NAIC generally changes the format of its Oracle data tables every year this download process will need extensive 
+changes to reflect the current NAIC table formats before executing correctly, although the process by which SQL code is 
+created for each table was done with the deliberate intent that year-over-year impacts from table changes be minimal. If column 
+names are unchanged data will still be pulled. However, the NAIC is not shy about changing the column names, which blows up the 
+individual SQL queries with a "column not found" error.  Additionally, existing SQL queries can't (to the best of my knowledge) 
+include any new columns. (I may be wrong about this, but any new columns may also blow up the Excel worksheet formats where the 
+bulk of the analysis is performed).  I remember that one evolution was to use the Oracle system tables to create the list of 
+column names to include in the SQL query, obviating the need to confirm the field names year-over-year. However, the Excel template 
+DID need to be changed so that the right data columns ended up in the correct columns in the Excel template.
+   
+    Table Name Formats
+        First character - L - life, X - health, P - P&C, F - Fraternal, T - Title insurers 
+		Year Reference - 2013, or CY, or PY9
+		Q - quarterly data
+		Schedule Name / Exhibit
+			SC-Schedule
+			PT-Part, 
+			SN-Section
+			Examples: LCYQSCDPT3_V - view of Life, current year, quarterly data, Sched D Part 3 (common stock)
+					  LCYQASSETS_V - view of Life, quarterly assets list, 
+					  LCYSCDBPTASN1FE_V
+			

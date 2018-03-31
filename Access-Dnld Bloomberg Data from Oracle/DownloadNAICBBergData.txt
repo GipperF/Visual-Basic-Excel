@@ -1,0 +1,550 @@
+' This module downloads all the NAIC Bloomberg data into local MS Access data tables, data which 
+' was then accessed by Excel QuickBar macros.
+
+Option Compare Database
+Option Explicit
+Const LIMITRECORDS = False 'True
+Const RECSTOSELECT = 25
+Const JUSTCOUNT = 0
+Const LogFileBBerg = "C:\CMData\zLogs\DownloadBBRecs.txt" 'this can be an empty .txt file
+
+Sub DownloadBBergDataToLocalTables()
+On Error GoTo ErrorHandler
+' Updated 4/30/13 by CFahey
+' This brings down all the Bloomberg data into specified files on the C Drive.
+' SUGGESTION: Copy existing BBerg1 file, rename it, & delete data tables before starting download.
+'     Doing this avoids having to recreate table links.
+'
+' Alternatively, once the download process is complete, and the files are renamed, create the following links in BBerg1.mdb:
+' BondTypes (the description table
+' KnownCUSIPs
+' CUSIPIssuers (the CUSIP Issuers file)
+' ISSUESA - E  (the CUSIP Issues Files)
+' InsurerInfo (in the RefData file)
+' InsurerInfoQ1 - Q3
+' SECURITY_SELDOM_TOPIC_V_1 (the other BBerg files)
+' SECURITY_SELDOM_TOPIC_V_2
+' SECURITY_SELDOM_TOPIC_V_3
+' SECURITY_SELDOM_TOPIC_V_4
+'
+' Because Bloomberg data is not linked to a given year, it should not have a year in the directory name.
+' Note that you will have to relink all the BBerg source tables to update the field names, etc. to avoid processing problems.
+' If you rearrange the tables in the files. be sure to update the links to reflect the changes.
+' The data dictionary does not use the file names, so it won't need to be updated.
+Dim wrkJet As DAO.Workspace
+Dim ThisDB  As DAO.Database
+Dim n As Object
+Dim obTimer As New CHighResTimer
+
+Dim MyTime As Double
+Dim LogFileNum As Integer
+Dim MySourceTable As String
+Dim MyTargetTable As String
+Dim MyTargetFile As String
+Dim ErrCode As Integer
+
+Dim strSQL As String
+Dim i As Byte
+Dim UserResponse As Integer
+Const WRITE2LOG = 1
+
+Const TargetDirectory = "C:\CMData\zBBergData\"
+Const TargetFile1 = "NewBBergData1.mdb" ' "BBergData1.mdb"
+Const TargetFile2 = "NewBBergData2.mdb" ' "BBergData2.mdb"
+Const TargetFile3 = "NewBBergData3.mdb" ' "BBergData3.mdb"
+
+    obTimer.StartTimer
+    Set wrkJet = CreateWorkspace("MyWorkSpace", "admin", "", dbUseJet)
+
+    DoCmd.SetWarnings False 'Turn Warnings Off
+    Set ThisDB = CurrentDb
+    
+    If WRITE2LOG Then
+        'LogFileDelete LogFile
+        LogFileNum = LogFileOpen(LogFileBBerg)
+    End If
+    
+    MsgBox "Know that this will take approximately 200 minutes, or over 3 hours!"
+    
+    'Check that the old BBerg data file can be written over
+    If Len(Dir(TargetDirectory & TargetFile1)) <> 0 Or Len(Dir(TargetDirectory & TargetFile2)) <> 0 Or Len(Dir(TargetDirectory & TargetFile3)) <> 0 Then
+        UserResponse = MsgBox("A Bloomberg file already exists in the targeted location. " & vbCrLf & _
+        "Click OK to move forward with replacing the Bloomberg data in the file, " & vbCrLf & vbCrLf & _
+        "OR click CANCEL to terminate, save the prior Bloomberg data databases, and then restart.", 1, "REPLACE OLD BLOOMBERG DATA?")
+        If UserResponse = 1 Then 'the OK button was pressed
+            'do nothing.  Proceed!
+        ElseIf UserResponse = 2 Then
+            GoTo MyExit
+        Else 'answer not understood
+            MsgBox "Answer not understood. Terminating process."
+            GoTo MyExit
+        End If
+    End If
+    
+    SysCmd acSysCmdSetStatus, "Starting Transfer Procedure. . . "
+    If LogFileNum Then LogStatus LogFileNum, "DownloadBBergDataToLocalTables", " Starting Transfer Procedure. . ."
+    For i = 0 To 8
+        If LogFileNum Then LogStatus LogFileNum, "DownloadBBergDataToLocalTables", " Looping (i = " & i & " )."
+
+        Select Case i
+            Case 0
+                MyTargetFile = TargetDirectory & TargetFile1
+                MySourceTable = "SECURITY_COMMON_V_1"
+                MyTargetTable = "SECURITY_COMMON_V_1"
+            Case 1
+                MyTargetFile = TargetDirectory & TargetFile3
+                MySourceTable = "SECURITY_PERIODIC_TOPIC_V_1"
+                MyTargetTable = "SECURITY_PERIODIC_TOPIC_V_1"
+            Case 2
+                MyTargetFile = TargetDirectory & TargetFile3
+                MySourceTable = "SECURITY_PERIODIC_TOPIC_V_2"
+                MyTargetTable = "SECURITY_PERIODIC_TOPIC_V_2"
+            Case 3
+                MyTargetFile = TargetDirectory & TargetFile1
+                MySourceTable = "SECURITY_FREQUENT_TOPIC_V_1"
+                MyTargetTable = "SECURITY_FREQUENT_TOPIC_V_1"
+            Case 4
+                MyTargetFile = TargetDirectory & TargetFile1
+                MySourceTable = "SECURITY_FREQUENT_TOPIC_V_2"
+                MyTargetTable = "SECURITY_FREQUENT_TOPIC_V_2"
+            Case 5
+                MyTargetFile = TargetDirectory & TargetFile3
+                MySourceTable = "SECURITY_SELDOM_TOPIC_V_1"
+                MyTargetTable = "SECURITY_SELDOM_TOPIC_V_1"
+            Case 6
+                MyTargetFile = TargetDirectory & TargetFile2
+                MySourceTable = "SECURITY_SELDOM_TOPIC_V_2"
+                MyTargetTable = "SECURITY_SELDOM_TOPIC_V_2"
+            Case 7
+                MyTargetFile = TargetDirectory & TargetFile2
+                MySourceTable = "SECURITY_SELDOM_TOPIC_V_3"
+                MyTargetTable = "SECURITY_SELDOM_TOPIC_V_3"
+            Case 8
+                MyTargetFile = TargetDirectory & TargetFile2
+                MySourceTable = "SECURITY_SELDOM_TOPIC_V_4"
+                MyTargetTable = "SECURITY_SELDOM_TOPIC_V_4"
+            Case 9
+''                MyTargetFile = TargetDirectory & TargetFile3
+''                MySourceTable = "MTG_PR_TYP_NUM_CURR_LOANS_V"
+''                MyTargetTable = MySourceTable
+            Case 10
+''                MyTargetFile = TargetDirectory & TargetFile3
+''                MySourceTable = "MTG_PR_TYP_PCT_CURR_BAL_V"
+''                MyTargetTable = MySourceTable
+            Case Else
+                'do nothing!
+        End Select
+        
+        SysCmd acSysCmdSetStatus, " Info from Source: " & MySourceTable & " to Table: " & MyTargetTable & ", into File:" & MyTargetFile & " - initiating download."
+
+        'ensure that the new table and new file exist and are all set to be loaded
+        ErrCode = ClearDecksForNewTable(MyTargetFile, MyTargetTable, LogFileNum)
+        If ErrCode = -1 Then
+            MsgBox "Problem creating either file or table.  " & vbCrLf & vbCrLf & _
+                "Please ensure that table " & MyTargetTable & " in file " & MyTargetFile & " does not exist.  " & vbCrLf & _
+                "If it exists, please remove and restart!"
+            SysCmd acSysCmdSetStatus, "Either table named " & MyTargetTable & " was found or target file " & MyTargetFile & " unable to be created. " & vbCrLf & _
+                "Table NOT available for Bloomberg data. Copy Process aborted. "
+            If LogFileNum Then LogStatus LogFileNum, "DownloadBBergDataToLocalTables", "Either table named " & MyTargetTable & " was found and could not be deleted or target file " & MyTargetFile & " unable to be created. Must correct, then restart."
+            GoTo MyExit
+        End If
+        
+        If LIMITRECORDS Then
+            strSQL = " SELECT TOP " & RECSTOSELECT & " "
+        Else
+            strSQL = " SELECT "
+        End If
+        strSQL = strSQL & MakeFieldString(ThisDB, MySourceTable, True) ' & ", Left(CUSIP,6) AS ISSUER "
+        strSQL = strSQL & " INTO " & MyTargetTable
+        strSQL = strSQL & " IN '" & MyTargetFile & "' "
+        strSQL = strSQL & " FROM " & MySourceTable & " ; "
+        
+        If LogFileNum Then LogStatus LogFileNum, "DownloadBBergDataToLocalTables", " Starting Transfer of " & MySourceTable & " into " & MyTargetFile & "."
+        SysCmd acSysCmdSetStatus, "Starting Transfer Procedure for " & MySourceTable & "."
+        If JUSTCOUNT Then
+            If i = 0 Then
+                'first, delete the table if it exists
+                MyTargetTable = "MyCount"
+                strSQL = " DROP TABLE " & MyTargetTable
+                DoCmd.RunSQL (strSQL)
+                'Make a new table for the first count
+                strSQL = " SELECT "
+                strSQL = strSQL & " '" & MySourceTable & "' as MyTable, "
+                strSQL = strSQL & " Count(" & MySourceTable & ".SECURITY_ID) AS CountOfSECURITY_ID "
+                strSQL = strSQL & " INTO " & MyTargetTable
+                strSQL = strSQL & " FROM " & MySourceTable & " ; "
+            Else
+                'INSERT INTO MyCount ( MyTable, CountOfSECURITY_ID )
+                'SELECT "SEC_PERIODIC" AS MyTable, Count(SECURITY_PERIODIC_TOPIC_V_1.SECURITY_ID) AS CountOfSECURITY_ID
+                'FROM SECURITY_PERIODIC_TOPIC_V_1;
+            
+                'append subsequent counts
+                strSQL = " INSERT INTO MyCount "
+                strSQL = strSQL & " ( MyTable, CountOfSECURITY_ID ) "
+                strSQL = strSQL & " SELECT '" & MySourceTable & "' as MyTable, Count(" & MySourceTable & ".SECURITY_ID) AS CountOfSECURITY_ID "
+                strSQL = strSQL & " FROM " & MySourceTable & " ; "
+            End If
+        End If
+        DoCmd.RunSQL (strSQL)
+        SysCmd acSysCmdSetStatus, " Info from Source: " & MySourceTable & " to Table: " & MyTargetTable & ", into File:" & MyTargetFile & " - download finished, " & ThisDB.RecordsAffected & " records downloaded."
+        If LogFileNum Then LogStatus LogFileNum, "DownloadBBergDataToLocalTables", " Transfer of " & MySourceTable & " to " & MyTargetTable & " in " & MyTargetFile & " complete."
+    Next i
+
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    SysCmd acSysCmdSetStatus, "DownloadBBergDataToLocalTables completed, " & ", information transfer took " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+    ThisDB.Close
+    wrkJet.Close
+    MsgBox "That's all, folks!"
+    GoTo MyExit
+    
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & ", i = " & i & vbCrLf & vbCrLf & Err.Description
+    SysCmd acSysCmdSetStatus, "Error #" & Err.Number & ", i = " & i & vbCrLf & vbCrLf & Err.Description & vbCrLf & _
+    strSQL
+    LogStatus LogFileNum, "ErrorHandler!!!", "Error #" & Err.Number & ", i = " & i & ", " & Err.Description
+    Err.Clear
+
+MyExit:
+    Set ThisDB = Nothing
+    Set n = Nothing
+    Set obTimer = Nothing
+    Set wrkJet = Nothing
+    If WRITE2LOG Then
+        LogStatus LogFileNum, "DownloadBBergDataToLocalTables", "Download Completed."
+        LogStatus LogFileNum, "MyExit", "Elapsed Time = " & Round(MyTime, 2) & " seconds or " & Round(MyTime / 60, 2) & " minutes."
+        LogFileClose LogFileNum
+    End If
+End Sub
+
+Function DropExistingTable(ByVal ipFileName As String, ipTableName As String) As Integer
+On Error GoTo ErrorHandler
+'written 11/2/11 by cfahey
+'this returns a 0 if the table is found and deleted, 1 if a table was not found, and -1 if an error is produced
+Dim wrkJet As DAO.Workspace
+Dim MyDB As DAO.Database
+Dim MyTd As TableDefs
+Dim n As Object
+
+    ipFileName = CleanFileName(ipFileName)
+    Set wrkJet = CreateWorkspace("MyWorkSpace", "admin", "", dbUseJet)
+    Set MyDB = wrkJet.OpenDatabase(ipFileName, dbOpenDynaset)
+
+    DropExistingTable = 1
+    For Each n In MyDB.TableDefs
+        If n.name = ipTableName Then
+            MyDB.Execute "Drop table " & ipTableName
+            DropExistingTable = 0
+            GoTo MyExit
+        End If
+    Next n
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    DropExistingTable = -1
+MyExit:
+    Set n = Nothing
+    Set MyTd = Nothing
+    MyDB.Close
+    Set MyDB = Nothing
+End Function
+
+Function ClearDecksForNewTable(ByVal ipFileName As String, ipTableName As String, Optional ipLogFileNum As Integer = 0) As Integer
+On Error GoTo ErrorHandler
+'written 8/8/12 by cfahey
+'If target file doesn't exist, it will create a new Access file
+'if the target file exists, it will remove the target Access table name
+'this returns a 0 if the table is found and deleted, 1 if a table or file was not found, and -1 if an error is produced
+Dim wrkJet As DAO.Workspace
+Dim db As DAO.Database
+Dim n As Object
+
+    ClearDecksForNewTable = 1
+    ipFileName = CleanFileName(ipFileName)
+    If Right(ipFileName, 4) <> ".mdb" Then
+        MsgBox "File does not appear to be an access filename. Aborting function 'ClearDecksForNewTable()'."
+        ClearDecksForNewTable = -1
+    Else
+        If Len(Dir(ipFileName)) = 0 Then 'you need to make the new Access file
+            Set wrkJet = DBEngine.Workspaces(0)
+            Set db = wrkJet.CreateDatabase(ipFileName, dbLangGeneral, dbVersion40) 'create a new Access File, using the targettablename
+            If ipLogFileNum Then LogStatus ipLogFileNum, "ClearDecksForNewTable", "File " & ipFileName & " not found. New file created."
+        Else 'the file exists. Does the table exist as well? If so, delete!
+        
+            Set wrkJet = CreateWorkspace("MyWorkSpace", "admin", "", dbUseJet)
+            Set db = wrkJet.OpenDatabase(ipFileName, dbOpenDynaset)
+        
+            For Each n In db.TableDefs
+                If n.name = ipTableName Then
+                    db.Execute "Drop table " & ipTableName
+                    ClearDecksForNewTable = 0
+                    If ipLogFileNum Then LogStatus ipLogFileNum, "ClearDecksForNewTable", "Table " & ipTableName & " in file " & ipFileName & " found and dropped."
+                    Exit For
+                End If
+            Next n
+        End If
+    End If
+    db.Close
+    wrkJet.Close
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    If ipLogFileNum Then LogStatus ipLogFileNum, "ClearDecksForNewTable", "Error produced in attempting to clear decks for table " & ipTableName & " in file " & ipFileName & "." & vbCrLf & vbTab & "Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+    ClearDecksForNewTable = -1
+MyExit:
+    Set n = Nothing
+    Set db = Nothing
+    Set wrkJet = Nothing
+End Function
+
+
+Function ListColHeadings(ipDB As DAO.Database, ipTableName As String, Optional ipAddReturns As Boolean) As String
+'written 11/14/12 by CFahey
+'Sample call:
+'    MyTable = "LCYexcapgloss_V"
+'    Set ThisDB = CurrentDb
+'    strFields = ListColHeadings(ThisDB, MyTable, True)
+'    MsgBox strFields ' or
+'        DumpVal = InputBox("", "Feel Free to Copy the Col Names", strFields)
+Dim MyRs As DAO.Recordset
+Dim FldName As Object
+Dim strSQL As String
+    strSQL = "SELECT TOP 1 * FROM " & ipTableName
+    Set MyRs = ipDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    
+    For Each FldName In MyRs.Fields
+        If ipAddReturns Then
+            ListColHeadings = ListColHeadings & FldName.name & ", " & vbCrLf
+        Else
+            ListColHeadings = ListColHeadings & FldName.name & ", "
+        End If
+    Next FldName
+    If ipAddReturns Then
+        ListColHeadings = Left(ListColHeadings, Len(ListColHeadings) - 4)
+    Else
+        ListColHeadings = Left(ListColHeadings, Len(ListColHeadings) - 2)
+    End If
+MyExit:
+    Set MyRs = Nothing
+    Set FldName = Nothing
+End Function
+
+Function MakeDOIFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'Updated 6/12/12 by cfahey
+'this returns a string of field names including LNCODE AND YEAR, at TDunn's request
+'it adds no SELECT statement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim tdfCurr As DAO.TableDef
+Dim fldCurr As DAO.Field
+Dim Str1 As String
+Dim Str2 As String
+Dim Str3 As String
+Dim Str4 As String
+Dim FldCnt As Integer
+
+    Set tdfCurr = ipDB(ipTableName)
+    FirstField = True
+    For Each fldCurr In tdfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeDOIFieldString = fldCurr.name & " "
+                Debug.Print fldCurr.name
+                Str1 = fldCurr.name & " "
+                FldCnt = 1
+                FirstField = False
+            Else
+                FldCnt = FldCnt + 1
+                Select Case fldCurr.name
+                    Case "SEPARATE_ACCOUNT_ID", "ORDR", "ACTIVE_ROW", "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else  ' INCLUDES "YEAR", "LNCODE" !!! 'TD requested these be added back:"YEAR", "LNCODE", so only include if it is a DOI download
+                        MakeDOIFieldString = MakeDOIFieldString & ", " & fldCurr.name
+                        Debug.Print fldCurr.name
+                        If FldCnt > 60 Then
+                            Str4 = Str4 & ", " & fldCurr.name
+                        ElseIf FldCnt > 40 Then
+                            Str3 = Str3 & ", " & fldCurr.name
+                        ElseIf FldCnt > 20 Then
+                            Str2 = Str2 & ", " & fldCurr.name
+                        Else
+                            Str1 = Str1 & ", " & fldCurr.name
+                        End If
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeDOIFieldString = ipTableName & "." & fldCurr.name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.name
+                    Case "SEPARATE_ACCOUNT_ID", "ORDR", "ACTIVE_ROW", "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else ' INCLUDES "YEAR", "LNCODE" at request of TD
+                        MakeDOIFieldString = MakeDOIFieldString & ", " & ipTableName & "." & fldCurr.name
+                End Select
+            End If
+        End If
+    Next fldCurr
+    'MakeDOIFieldString = MakeDOIFieldString & " FROM " & ipTableName & " " & ipWhereAs
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+
+MyExit:
+    Set fldCurr = Nothing
+    Set tdfCurr = Nothing
+End Function
+
+Function MakeFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written March, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT statement. It optionally takes a WHERE clause
+Dim FirstField As Boolean
+Dim tdfCurr As DAO.TableDef
+Dim fldCurr As DAO.Field
+Dim Str1 As String
+Dim Str2 As String
+Dim Str3 As String
+Dim Str4 As String
+Dim FldCnt As Integer
+
+    Set tdfCurr = ipDB(ipTableName)
+    FirstField = True
+    For Each fldCurr In tdfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                MakeFieldString = fldCurr.name & " "
+                Debug.Print fldCurr.name
+                Str1 = fldCurr.name & " "
+                FldCnt = 1
+                FirstField = False
+            Else
+                FldCnt = FldCnt + 1
+                Select Case fldCurr.name
+'                    Case "CoCode" ' assumed to be the first field
+'                        MakeFieldString = fldCurr.Name & " "
+                    Case "ORDR", "ACTIVE_ROW", "LAST_UPDATE", "SEPARATE_ACCOUNT_ID"  'Tom requested these two fields! :"YEAR", "LNCODE",
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & fldCurr.name
+                        Debug.Print fldCurr.name
+                        If FldCnt > 60 Then
+                            Str4 = Str4 & ", " & fldCurr.name
+                        ElseIf FldCnt > 40 Then
+                            Str3 = Str3 & ", " & fldCurr.name
+                        ElseIf FldCnt > 20 Then
+                            Str2 = Str2 & ", " & fldCurr.name
+                        Else
+                            Str1 = Str1 & ", " & fldCurr.name
+                        End If
+                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                MakeFieldString = ipTableName & "." & fldCurr.name & " "
+                FirstField = False
+            Else
+                Select Case fldCurr.name
+'                    Case "CoCode" ' assumed to be the first field
+'                        MakeFieldString = ipTableName & "." & fldCurr.Name & " "
+                    Case "YEAR", "LNCODE", "ORDR", "ACTIVE_ROW", "YEAR", "LAST_UPDATE"
+                        'do nothing! drop the field!
+                    Case Else
+                        MakeFieldString = MakeFieldString & ", " & ipTableName & "." & fldCurr.name
+                End Select
+            End If
+        End If
+    Next fldCurr
+    'MakeFieldString = MakeFieldString & " FROM " & ipTableName & " " & ipWhereAs
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+
+MyExit:
+    Set fldCurr = Nothing
+    Set tdfCurr = Nothing
+End Function
+
+Function MakeIssueFieldString(ipDB As DAO.Database, ipTableName As String, ipSingleTable As Boolean, Optional ipWhereas As String) As String
+On Error GoTo ErrorHandler
+'written May, 2012 by cfahey
+'this returns a string of field names from a table
+'it adds no SELECT statement. It optionally takes a WHERE clause
+Dim tdfCurr As DAO.TableDef
+Dim fldCurr As DAO.Field
+Dim TempFldList As String
+Dim FldCnt As Integer
+Dim FirstField As Boolean
+Dim Str1 As String
+Dim Str2 As String
+Dim Str3 As String
+Dim Str4 As String
+    
+    'Set tdfCurr = ipdb(ipTableName)
+    Set tdfCurr = ipDB.TableDefs(ipTableName)
+    FirstField = True
+    For Each fldCurr In tdfCurr.Fields
+        If ipSingleTable Then 'don't need to add the "TABLENAME." to the SQL Code
+            If FirstField Then
+                TempFldList = fldCurr.name & " "
+                Debug.Print fldCurr.name
+                Str1 = fldCurr.name & " "
+                FldCnt = 1
+                FirstField = False
+            Else
+                FldCnt = FldCnt + 1
+'                Select Case fldCurr.Name
+''                    Case "CoCode" ' assumed to be the first field
+''                        MakeFieldString = fldCurr.Name & " "
+'                    Case "YEAR", "LNCODE", "ORDR", "ACTIVE_ROW", "LAST_UPDATE"
+'                        'do nothing! drop the field!
+'                    Case Else
+                        TempFldList = TempFldList & ", " & fldCurr.name
+                        Debug.Print fldCurr.name
+                        If FldCnt > 60 Then
+                            Str4 = Str4 & ", " & fldCurr.name
+                        ElseIf FldCnt > 40 Then
+                            Str3 = Str3 & ", " & fldCurr.name
+                        ElseIf FldCnt > 20 Then
+                            Str2 = Str2 & ", " & fldCurr.name
+                        Else
+                            Str1 = Str1 & ", " & fldCurr.name
+                        End If
+'                End Select
+            End If
+        Else ' be sure to specify the table name
+            If FirstField Then
+                TempFldList = ipTableName & "." & fldCurr.name & " "
+                FirstField = False
+            Else
+'                Select Case fldCurr.Name
+'                    Case "CoCode" ' assumed to be the first field
+'                        MakeFieldString = ipTableName & "." & fldCurr.Name & " "
+'                    Case "YEAR", "LNCODE", "ORDR", "ACTIVE_ROW", "YEAR", "LAST_UPDATE"
+                        'do nothing! drop the field!
+'                    Case Else
+                        TempFldList = TempFldList & ", " & ipTableName & "." & fldCurr.name
+'                End Select
+            End If
+        End If
+    Next fldCurr
+    'MakeFieldString = MakeFieldString & " FROM " & ipTableName & " " & ipWhereAs
+    MakeIssueFieldString = TempFldList
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error condition. . . "
+MyExit:
+    Set tdfCurr = Nothing
+    Set fldCurr = Nothing
+End Function

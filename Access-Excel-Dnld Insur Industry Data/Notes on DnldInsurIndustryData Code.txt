@@ -1,0 +1,42 @@
+                      
+					  Notes on DnldInsurIndustryData Code
+					  
+The VBA code in the DnldInsurIndustryData file, meant for MS Access with links to NAIC Oracle tables, 
+pulls down data from many different tables in NAIC's Oracle database and loads it into an Excel workbook.
+Once the data is loaded into a workbook the CoCodes can be verified as aligned between Asset and Liability 
+balances to ensure that the balances are synchronized and correctly associated. Also, the Schedule DA 
+assets can be coordinated with the Schedule D assets to get proper net amounts. 
+
+There is a loop to go through the various years, and a loop to go through the various Schedules to get the 
+necessary summary data amounts. Unfortunately, the data locations are different for the 5 different 
+insurance industry types recognized bythe NAIC - Health, P&C, Life, Fraternal, and Title. And these 
+differences subtly change each year, so to be flexible, the CY (current year), PY (prior year) references 
+need to change to 2014/2013, etc references to track those subtle changes each year (or face nightmare 
+updates each year to keep code current). 
+
+The Excel file has template spreadsheets for assets and liabilities and I think other balance types. The 
+template sheets are copied, and the data dumped into the sheets. Then, importantly, the data is verified 
+in the Excel spreadsheet, and compiled into one sheet (I believe). Importantly, a macro for each template 
+or each year is then run from within the Excel spreadsheet to move the data back into MS Access, this time 
+as a local table instead of from Oracle.  From there, it can be married to local queries, and dumped directly 
+into other Excel spreadsheets.  
+
+I had developed functionality to treat the balances that were available by CoCode in a way similar to 
+the Bloomberg data, so I could upload a list of CoCodes to a local, temp table via a macro attached to 
+the QuickBar.  The second QuickBar macro would then read a list of column headings from the selected 
+range, run the join to the tables that resulted from this related code, and download the requested data.
+So, if one wanted to see the quarterly progression of assets for the largest Life insurers, or indeed for 
+all insurers, one could upload the list of cocodes, and then in a separate step select the column headings 
+which were, for example ASSETS, ASSETSQ1, ASSETSQ2, and ASSETSQ3 to retrieve the appropriate balances. 
+
+This code provided an important step in terms of making very useful data for analysis immediately available 
+for peer comparisons, ranking, etc. in a format synonymous to a Bloomberg terminal download function. This 
+code provided the important first step of bringing all the data together into Excel in a format which 
+robustly maintained processing despite the year-over-year and industry-to-industry format changes in the 
+Oracle tables.  
+  
+The Excel file HistInsurerInfo.xlsm is the template file, empty of data, containing only template sheets 
+(I believe). The Excel file HistInsurerInfo-2013-10-8.xlsm contains data downloaded on that data, and 
+is loaded with a string of industry summary data. The command buttons in the summary sheets can be 
+executed to move the data in each spreadsheet into the target / relevant MS Access data tables for use 
+by the macros tied to QuickBar icons. 

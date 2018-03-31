@@ -1,0 +1,37 @@
+              
+			  
+			  Background on the Bloomberg Data Download Process
+			  
+The NAIC purchased Bloomberg data in bulk several years in a row. After several months, the data was loaded 
+into Oracle. There, the data can be used in table joins with other tables on the Oracle database, including 
+tables which contain insurer statutory filings. However, response times are quite poor for such queries. 
+
+The code in the DownloadNAICBBergData.txt file basically downloads the Bloomberg data from Oracle to MS Access. 
+There are a couple of wrinkles to this download process. First, MS Access files cannot exceed 2 GB.  This is a 
+design limitation. However, links to tables in other Access files are an effective workaround of the data 
+limit. The difference is invisible to queries. 
+
+The 12 tables up on Oracle once downloaded are spread across 3 MS Access files. 
+
+Another wrinkle is that some of the Oracle fields were "memo" fields, which were much larger than what MS Access 
+can handle. Such fields dramatically slow down and stop the transfer due to timeouts or space
+overages. First, such fields must be identified manually and then the length of the longest value in those memo 
+need to be identified, again manually. 
+
+Once this information is collected, the Bloomberg data table structures are copied (without the data) and 
+then the structures of the empty tables are modified to remove the memo fields. 
+
+Across the tables were a small number of duplicate fields. Also, many of the fields had data values which were based off 
+of market conditions or interest rates, and were invalid certainly by the time the data was loaded into 
+Oracle.  Nevertheless the data was made available in MS Access.   
+
+The Bloomberg data was spread across 7 tables. Tracking the data from a field name to a table name 
+required a data map, which initially was an Excel file, and then loaded into a MS Access table. A VBA function was used 
+to ID the relevant table name for any given field. 
+
+It is believed but not verified that the code necessary to complete the download process is contained in the 
+related VBA file.  This VBA file contains some useful techniques which can be applied to any new transfer process, most 
+notably the reading of the column names to build an SQL query, leaving out any unnecessary column names, and adding 
+perhaps some additional useful fields. 
+
+

@@ -1,0 +1,2131 @@
+'    The CoCode download requires a syncronized XLS workbook so data goes directly into the proper spreadsheets.  Note that the template to 
+'    which the formatted data is dumped is specified in the code as "G:\Data\ChrisFahey\2013\IAR-Template6.xlsm".
+'    Obviously, all those directory references in the code will need to be changed. Also the file name if that file name doesn't work, or if the 
+'    user wants to dump to their own template.  Because column headings and order changed every year, the downloads needed to be verified 
+'    for every given year. Becuase the analysis typically required two years of data for each table (and sometimes up to 5 years of data) 
+'    this increased the work of table / data verification, at least at the beginning of the "PAM" season. 
+'
+'	Before you can use any of the Access code, links are needed to the various external database tables. Next, bring down 
+'	the template for the output excel file (if necessary). Next, update all the references in the VBA code to the 
+'	actual output/template file and directory.  Lastly, try to use by putting the pointer/cursor in the subroutine 
+'   RetrieveCoCodeInfo() in the DnldCoCode module and hit F5 or the Run key to kick-starts your download process.
+'
+' ==============================================================================
+'    This module - DnldCoCode - downloads the data used for any given CoCode
+' ==============================================================================
+
+Option Explicit
+Option Compare Database
+
+Dim MyTableNum As Integer
+Const CONFIRMHEADINGS = 0   'NB CONFIRM HEADINGS is only to be run once a year to confirm that column headings and order haven't changed. It dumps just the field names into the various spreadsheets
+Const SepAcctDnld = 0 'note - this only works as a DOI download.  Template offsets have not been modified for Separate Account differences
+Const DOIRun = 0
+Const DOWNLOADHIST = 1
+Const CLOSEONEXIT = 1
+'this downloads CoCode information
+Sub RetrieveCoCodeInfo()
+'******************************************************************
+' MAIN CALLING PROCEDURE - RUN THIS SUBROUTINE!!!!
+'******************************************************************
+'Written 8/25/11 by cfahey
+'Updated 3/17/12 by cfahey
+'further improvements:
+'   Add a form specific to this function
+Dim TmpCocode As String
+Dim EntryValid As Boolean
+Dim ValidCoCode As Double
+Dim MyTime As Double
+Dim obTimer As New CHighResTimer
+
+    On Error GoTo ErrorHandler1
+    MsgBox "For 2012, a vigorous confirmation of numbers, descriptions, and locations has not yet been done.  Use at your own risk! " & _
+    vbCrLf & vbCrLf & "Also note that, due to space restrictions on G:, Excel files will be saved to the C:\CMData\ directory." & _
+    vbCrLf & "Speak to Chris Fahey if problems arise due to this change."
+    obTimer.StartTimer
+    EntryValid = False
+    Do
+        TmpCocode = InputBox("Enter Valid CoCode (Enter 0 or hit [CANCEL] to exit): ", "COCODE ENTRY", 0)
+        If TmpCocode = "0" Or TmpCocode = "" Then
+            GoTo MyExit
+        Else
+            If Len(TmpCocode) <> 5 Then
+                MsgBox "Please enter a five digit number."
+            Else
+                ValidCoCode = CDbl(TmpCocode)
+                EntryValid = True
+            End If
+        End If
+    Loop Until EntryValid
+    GetCoCodeInfo2 ValidCoCode
+
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    MsgBox "That's all, folks!"
+    GoTo MyExit
+    
+ErrorHandler1:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    SysCmd acSysCmdSetStatus, "CoCode " & ValidCoCode & " Download did not complete due to error condition. . . "
+    Err.Clear
+
+MyExit:
+    Set obTimer = Nothing
+    SysCmd acSysCmdSetStatus, "CoCode " & ValidCoCode & " download completed successfully in " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+End Sub
+Sub GetCoCodeInfo2(ipCoCode As Double)
+On Error GoTo ErrorHandler
+'Included are the following schedules:
+' Schedule A1 (Real Estate)
+' Schedule B1 (Mortgages)
+' Schedule BA (Other Assets)
+' Schedule D, Part 1, Current Year (Debt) and Prior Year
+' Schedule D, Part 2, Section 1 (Pfd/S)
+' Schedule D, Part 2, Section 2 (C/S)
+' Schedule DA (Short Term)
+' Schedule E
+' Assets Page, Current and Prior years
+' Liabilities Page, Current and Prior years
+' Schedule DB, Part A1
+' Schedule DB, Part B1
+' Schedule DL, Part 1 and 2
+' Historical Income for past 5 years
+' Gains and Losses for the past 5 years
+' Spreadsheets which hide when no data was downloaded
+'
+' and, in a perfect world,(STILL TO DO!!!)
+' Need to add:
+' ============
+' Create a local table (perhaps fed from an Excel spreadsheet) that identifies the tables to download.
+' Interogatorries would be nice
+' Row identifiers for 2012 data probably should be added to the template, as well as headings, particularly for Asset and Liability pages.
+' Colors for different types of Tabs (Blue for debt, orange for Pref'd, Yellow for common?).
+' Footnotes to Schedule DB, Part A1 and Part B1
+' Footnote tables for DL, DB Sn A Pt1 and DB Sn B Pt1
+' Current credit ratings for all bonds in the bond table, from the Ratings table
+' Revenue sheets for past 5 years
+' Maturity Schedule from the profile
+' Relevant (specific!) info from the notes and interrogatories
+'This function attempts to go through the various fieelds in a table to construct the SQL code
+' instead of relying upon distinct and explicit field names (which may change every year!)
+
+Dim ThisDB As DAO.Database 'must be DAO because I use wildcard characters, verb "LIKE"
+Dim RS As DAO.Recordset
+Dim XLApp As Excel.Application
+Dim XLWkBk As Excel.Workbook
+Dim XLWkSht As Excel.Worksheet
+Dim n As Object
+
+Dim i, j As Integer
+Dim ErrCode As Integer
+Dim strSQL As String
+Dim TableNm(50) As String
+Dim WhereAs(50) As String
+Dim TabNm(50) As String
+Dim DumpCell(50) As String 'this is set in another function / routine, after being passed "ByRef"
+Dim HistDCnt As Long
+Dim HistPfdCnt As Long
+Dim HistCSCnt As Long
+Dim DayOfYear As Integer
+
+Dim InsurerType As String
+Dim SchedD1CY As String
+Dim SchedD1PY As String
+Dim SchedD2S1 As String
+Dim SchedD2S2 As String
+Dim AssetsCY As String
+Dim AssetsPY As String
+Dim LiabsCY As String
+Dim LiabsPY As String
+
+Dim SchedD1Hist As String
+Dim SchedD2S1Hist As String
+Dim SchedD2S2Hist As String
+
+Dim GainsAndLosses As String
+Dim NetInvIncome As String
+Dim RecycleSuccessful As Boolean
+Dim MyErrorText As String
+Dim ReportAddr As String
+
+Dim SOURCEXLFILE As String
+Dim TARGETXLFILE As String
+Dim UserName As String
+Dim CocodeLoc As String
+Dim ShrtNameLoc As String
+Dim FullNameLoc As String
+Dim FilingTypeLoc As String
+Dim FilingTypeLoc2 As String
+Dim CurYE As String
+Dim BusinessTypeLoc As String
+Dim CompanyTypeLoc As String
+Dim ActiveStatusLoc As String
+Dim CompStatCodeLoc As String
+Dim CompStatDescLoc As String
+Dim StateOfDomLoc As String
+Dim CountryOfDomLoc As String
+Dim IncorpDateLoc As String
+Dim CommenceBizLoc As String
+Dim DumpLogLoc As String
+Dim SepAcctsIndLoc As String
+Dim strCY As String
+Dim strPY As String
+
+Dim MaxAutoDownloads As Byte
+
+Const DefaultCell = "A2" 'When debugged, it should be "A2"
+Const HeadingDefaultCell = "A7"
+Const FirstYearForGainsLosses = 2007 ' had been working when this was 2006
+Const cCY = "2012"
+Const cPY = "2011"
+
+'Dim FoundSheet As Boolean
+'Dim NameLen As Byte
+'Dim TARGETTABLE As String
+'Const BASICINFO = "BasicInfo"
+'Const MortgDefaultCell = "A3" 'When debugged, it should be "A3"
+    
+    UserName = Environ("USERNAME")
+    
+    If SepAcctDnld Then
+        strCY = "CYA"
+        strPY = "PYA"
+        
+        If DOIRun = 0 Then
+            MsgBox "Note that the Separate Accounts download currently only works for a DOI run." & vbCrLf & _
+            "Please set the DOIRun flag to either 1 or True and restart. "
+            GoTo MyExit
+        End If
+    Else
+        strCY = "CY"
+        strPY = "PY"
+    End If
+    
+    If DOIRun Then 'create a table of summary reference information useful for the raw data dump
+        CocodeLoc = "C3"
+        ShrtNameLoc = "C4"
+        FullNameLoc = "C5"
+        FilingTypeLoc = "C6"
+        FilingTypeLoc2 = "C7"
+        BusinessTypeLoc = "c8"
+        CompanyTypeLoc = "c9"
+        ActiveStatusLoc = "c10"
+        CompStatCodeLoc = "c11"
+        CompStatDescLoc = "c12"
+        StateOfDomLoc = "c13"
+        CountryOfDomLoc = "c14"
+        IncorpDateLoc = "c15"
+        CommenceBizLoc = "c16"
+        DumpLogLoc = "H3"
+        CurYE = "C17"
+        SepAcctsIndLoc = "C1"
+    Else 'use the template's existing data locations to provide summary reference information 
+        CocodeLoc = "D8"
+        ShrtNameLoc = "C11"
+        FullNameLoc = "B8"
+        FilingTypeLoc = "H12"
+        FilingTypeLoc2 = "C12"
+        CurYE = "C13"
+        BusinessTypeLoc = "H13"
+        CompanyTypeLoc = "H14"
+        ActiveStatusLoc = "H15"
+        CompStatCodeLoc = "H16"
+        CompStatDescLoc = "H18"
+        StateOfDomLoc = "H19"
+        CountryOfDomLoc = "H20"
+        IncorpDateLoc = "H21"
+        CommenceBizLoc = "H22"
+        DumpLogLoc = "X49"
+        SepAcctsIndLoc = "C1"
+    End If
+
+    If Month(Now()) = 2 Then
+        MsgBox "NB: Historically, ISITE tables have not been fully available in February and March." & vbCrLf & _
+        "Please confirm that the records that end up in the Excel spreadsheet are complete before starting your analysis, " & vbCrLf & _
+        "to ensure you have a complete picture of the relevant investment information."
+    End If
+    
+    Set ThisDB = CurrentDb
+
+    
+    'Determine the type of insurer that is being retrieved.  This will drive what tables in this database we open
+    'use a recordset to retrieve specific fields
+    
+    SysCmd acSysCmdSetStatus, "Retrieving Insurer Background Information. . . "
+    strSQL = " SELECT COMPANY_V.COCODE, COMPANY_V.SHORT_COMPANY_NAME, COMPANY_V.FULL_COMPANY_NAME, COMPANY_V.STATE_OF_DOMICILE, "
+    strSQL = strSQL & " COMPANY_V.ACTIVE_STATUS, COMPANY_V.BUSINESS_TYPE_CODE, COMPANY_V.BUSINESS_SUB_TYPE_CODE, COMPANY_V.COMPANY_TYPE_CODE, COMPANY_V.INCORPORATED_DATE, "
+    strSQL = strSQL & " COMPANY_V.COMMENCED_BUSINESS_DATE, COMPANY_V.COUNTRY_OF_DOMICILE, COMPANY_FILING_TYPE.DESCRIPTION AS COMP_FILING_DESC, "
+    strSQL = strSQL & " COMPANY_STATUS.COMPANY_STATUS_CODE, COMPANY_STATUS.DESCRIPTION as COMP_STAT_DESC "
+    'strSQL = strSQL & " INTO " & BASICINFO
+    'strSQL = strSQL & " IN " & TargetFileName ''C:\CMData\2012\000Working\CoCodeInfo1.mdb' "
+    strSQL = strSQL & " FROM COMPANY_STATUS "
+    strSQL = strSQL & " INNER JOIN (COMPANY_FILING_TYPE INNER JOIN COMPANY_V ON COMPANY_FILING_TYPE.FILING_TYPE = COMPANY_V.FILING_TYPE) "
+    strSQL = strSQL & " ON COMPANY_STATUS.COMPANY_STATUS_CODE = COMPANY_V.COMPANY_STATUS_CODE "
+    strSQL = strSQL & " WHERE (((COMPANY_V.COCODE)= " & ipCoCode & " )); "
+
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    If RS.RecordCount = 0 Then
+        MsgBox "It appears that the CoCode entered (" & ipCoCode & ") is not found.  " & vbCrLf & vbCrLf & "Please verify the cocode, and restart the download process."
+        RS.Close
+        ThisDB.Close
+        GoTo MyExit
+    End If
+    
+    'now tie the search to a recordset, so that the individual fields can be analyzed
+    If CleanFileName(RS.Fields("BUSINESS_SUB_TYPE_CODE").Value) <> "N" Then 'this is likely a BC/BS company, technically a L, A, & H, filing as a H company!
+        InsurerType = "X"
+    Else
+        InsurerType = RS.Fields("business_type_code").Value
+    End If
+    If (SepAcctDnld And (InsurerType = "P" Or InsurerType = "X" Or InsurerType = "T")) Then
+        MsgBox "Note that you requested a download of Separate Account information, " & vbCrLf & _
+        "Unfortunately, the specified CoCode is in an industry (" & InsurerType & ") which has no Separate Accounts. " & vbCrLf & vbCrLf & _
+        "Please either change the CoCode, or turn off the Separate Accounts download."
+        GoTo MyExit
+    End If
+    
+    'Straighten out the file names.
+    'SOURCEXLFILE = "G:\data\ChrisFahey\2013\IAR-Template6.xlsm"
+    SOURCEXLFILE = "G:\Data\ChrisFahey\2013\IAR-Template6.xlsm"
+    If DOIRun Then SOURCEXLFILE = "G:\Data\ChrisFahey\2013\IAR-TestBook.xlsm"
+    If SepAcctDnld Then
+        If DOIRun Then
+            'TARGETXLFILE = "G:\Data\ChrisFahey\2013\IARData-SA-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+            TARGETXLFILE = "C:\CMData\IARData-SA-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+        Else
+            'TARGETXLFILE = "G:\Data\ChrisFahey\2013\IAR-SA-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+            TARGETXLFILE = "C:\CMData\IAR-SA-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+        End If
+    Else
+        If DOIRun Then
+            'TARGETXLFILE = "G:\data\ChrisFahey\2013\IARData-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+            TARGETXLFILE = "C:\CMData\IARData-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+        Else
+            If UCase(UserName) = "CFAHEY" Then 'use my special naming convention!
+                 'TARGETXLFILE = "G:\data\ChrisFahey\2013\IAR-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+                TARGETXLFILE = "C:\CMData\2013\AAA-Prelims\IAR-" & MakeNickName(RS.Fields("SHORT_COMPANY_NAME").Value) & "-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+            Else 'use this filename for everyone else
+               'TARGETXLFILE = "G:\data\ChrisFahey\2013\IAR-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+                TARGETXLFILE = "C:\CMData\IAR-" & MakeNickName(RS.Fields("SHORT_COMPANY_NAME").Value) & "-" & ipCoCode & "-" & CStr(Year(Now())) & "-" & CStr(Month(Now())) & "-" & CStr(Day(Now())) & ".xlsm"
+            End If
+        End If
+    End If
+
+    'Now open up the SOURCE XL File, Save the CoCode Info in Assumes, and then save it as TARGET XL file!
+    Set XLApp = New Excel.Application
+    XLApp.Visible = True
+    XLApp.ScreenUpdating = True
+    XLApp.AskToUpdateLinks = False 'cannot set the calculation to manual until the (or a) workbook is open
+    
+    If Len(Dir$(SOURCEXLFILE)) > 0 Then ' the file exists, so we should open it up!
+        'delete the targetfile if it exists already!
+        
+        If Len(Dir$(TARGETXLFILE)) > 0 Then ' the file exists, so we should open it up!
+            SysCmd acSysCmdSetStatus, "Deleting Existing File " & TARGETXLFILE & ". . . "
+            RecycleSuccessful = Recycle(TARGETXLFILE, MyErrorText) 'we could have used the kill command, but the recycle command places in wastebasket
+            If Not RecycleSuccessful Then
+                MsgBox "Was unable to delete existing file. Try deleting prior datafile manually, then restart!" & vbCrLf & vbCrLf & MyErrorText
+                SysCmd acSysCmdSetStatus, "Was unable to delete existing file. Try deleting prior datafile manually, then restart!  " & MyErrorText
+                GoTo MyExit
+            End If
+        End If
+        Set XLWkBk = XLApp.Workbooks.Open(SOURCEXLFILE)
+        
+        'DateStamp the download
+        If DOIRun Then
+            XLWkBk.Sheets("Sheet1").Range("B2").Value = "Datestamp: "
+            XLWkBk.Sheets("Sheet1").Range("C2").ColumnWidth = 15
+            XLWkBk.Sheets("Sheet1").Range("C2").Value = Now()
+            Set XLWkSht = XLWkBk.Sheets("Sheet1")
+            XLWkSht.name = "Assumes"
+            XLWkSht.Visible = xlSheetHidden
+        Else
+            For Each n In XLWkBk.Worksheets
+                If n.name = "Assumes" Then
+                    'FoundSheet = True
+                    XLWkBk.Sheets("Assumes").Range("G17").Value = "DateStamp:"
+                    XLWkBk.Sheets("Assumes").Range("H17").Value = Now()
+                    Set XLWkSht = n 'XLWkbk.Sheets("Assumes")
+                    i = 1
+                    Exit For
+                End If
+            Next n
+        End If
+        
+        MyTableNum = 0 'initialize the (global) variable
+        LogMyDataDownload XLWkSht, "Assumes", RS.RecordCount
+        
+        XLWkSht.Range(CocodeLoc).Value = RS.Fields("COCODE").Value
+        XLWkSht.Range(ShrtNameLoc).Value = RS.Fields("SHORT_COMPANY_NAME").Value
+        XLWkSht.Range(FullNameLoc).Value = RS.Fields("FULL_COMPANY_NAME").Value
+        XLWkSht.Range(FilingTypeLoc).Value = RS.Fields("COMP_FILING_DESC").Value
+        XLWkSht.Range(BusinessTypeLoc).Value = RS.Fields("business_type_code").Value
+        XLWkSht.Range(CompanyTypeLoc).Value = RS.Fields("COMPANY_TYPE_CODE").Value
+        XLWkSht.Range(ActiveStatusLoc).Value = RS.Fields("ACTIVE_STATUS").Value
+        XLWkSht.Range(CompStatCodeLoc).Value = RS.Fields("COMPANY_STATUS_CODE").Value
+        'XLWkbk.Sheets("Assumes").Range(CompStatDescLoc).Value = Rs.Fields("COMPANY_STATUS.DESCRIPTION").Value
+        XLWkSht.Range(CompStatDescLoc).Value = RS.Fields("COMP_STAT_DESC").Value
+        XLWkSht.Range(StateOfDomLoc).Value = RS.Fields("STATE_OF_DOMICILE").Value
+        XLWkSht.Range(CountryOfDomLoc).Value = RS.Fields("COUNTRY_OF_DOMICILE").Value
+        XLWkSht.Range(CurYE).Value = "12/31/" & (Year(Now) - 1)
+        XLWkSht.Range(CurYE).Offset(1, 0).Value = "12/31/" & (Year(Now) - 2)
+        If RS.Fields("INCORPORATED_DATE").Value > #1/1/1900# Then 'the date will blow up in Excel
+            XLWkSht.Range(IncorpDateLoc).Value = RS.Fields("INCORPORATED_DATE").Value
+        Else
+            XLWkSht.Range(IncorpDateLoc).Value = "Before 1900"
+        End If
+        If RS.Fields("COMMENCED_BUSINESS_DATE").Value > #1/1/1900# Then
+            XLWkSht.Range(CommenceBizLoc).Value = RS.Fields("COMMENCED_BUSINESS_DATE").Value
+        Else
+            XLWkSht.Range(CommenceBizLoc).Value = "Before 1900"
+        End If
+        If InsurerType = "L" Then
+            XLWkSht.Range(FilingTypeLoc2).Value = 1
+        ElseIf InsurerType = "P" Then
+            XLWkSht.Range(FilingTypeLoc2).Value = 2
+        ElseIf InsurerType = "X" Then
+             XLWkSht.Range(FilingTypeLoc2).Value = 3
+        ElseIf InsurerType = "F" Then
+             XLWkSht.Range(FilingTypeLoc2).Value = 4
+        ElseIf InsurerType = "T" Then
+             XLWkSht.Range(FilingTypeLoc2).Value = 5
+        Else
+            MsgBox "This program only works for Life, P/C, Health, Fraternal, and Title insurers. " & vbCrLf & _
+            "Insurer type " & InsurerType & " not found. Cancelling download - No data will be downloaded. " & vbCrLf & _
+                "Contact Chris Fahey (SVO x1967) for enhancements."
+            GoTo MyExit
+        End If
+        
+        If SepAcctDnld Then
+            XLWkSht.Range(SepAcctsIndLoc).Value = 1
+        Else
+            XLWkSht.Range(SepAcctsIndLoc).Value = 0
+        End If
+    Else
+        MsgBox "SOURCE FILE NOT FOUND!"
+        GoTo MyExit
+    End If
+    
+    '*********************************************** Main Download ***********************************************
+    'XLApp.Calculation = xlCalculationManual
+    DayOfYear = DateDiff("d", DateValue("12/31/" & Year(Now()) - 1), Now()) 'number of days since last year-end to determine if we need to download Qtrly info
+    
+    'Next, set array values for Schedule names, Tab names, default locations, etc.  Note the last parameter will return the count which is needed to exclude qtrly schedules
+    AssignArrayValues InsurerType, ipCoCode, TableNm, WhereAs, TabNm, DumpCell, MaxAutoDownloads
+    
+    For i = 0 To MaxAutoDownloads
+
+        If CONFIRMHEADINGS Then 'NB CONFIRM HEADINGS is only to be run once a year to confirm that the field titles and locations haven't changed.
+            strSQL = " SELECT TOP 1 " & MakeFieldString(ThisDB, TableNm(i), True) & " FROM " & TableNm(i) & WhereAs(i)
+        Else
+            If DOIRun Then 'TD wanted YEAR and LNCODE fields!
+                strSQL = " SELECT " & MakeDOIFieldString(ThisDB, TableNm(i), True) & " FROM " & TableNm(i) & WhereAs(i)
+            Else
+                strSQL = " SELECT " & MakeFieldString(ThisDB, TableNm(i), True) & " FROM " & TableNm(i) & WhereAs(i)
+            End If
+        End If
+        
+        SysCmd acSysCmdSetStatus, "Moving Records From " & TableNm(i) & ". . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        If CONFIRMHEADINGS Then
+                'CopyRecordsetToExcelFile RS, TableNm(I), ipCoCode, TARGETXLFILE, HeadingDefaultCell, XLWkBk, True
+                CopyRecordsetToExcelFile RS, TabNm(i), ipCoCode, TARGETXLFILE, HeadingDefaultCell, XLWkBk, True
+                LogMyDataDownload XLWkSht, TableNm(i) & " in " & TableNm(i), RS.RecordCount
+        Else
+            If DOIRun Then 'just dump the plain data
+                CopyRecordsetToExcelFile RS, TableNm(i), ipCoCode, TARGETXLFILE, DumpCell(i), XLWkBk, True
+                LogMyDataDownload XLWkSht, TableNm(i) & " in " & TableNm(i), RS.RecordCount
+            Else 'put the data into a specific location in my template
+                CopyRecordsetToExcelFile RS, TabNm(i), ipCoCode, TARGETXLFILE, DumpCell(i), XLWkBk
+                LogMyDataDownload XLWkSht, TableNm(i) & " in " & TabNm(i), RS.RecordCount
+            End If
+        End If
+        Set RS = Nothing
+        
+        If i = (MaxAutoDownloads - 2) And (SepAcctDnld Or DayOfYear < 140) Then i = MaxAutoDownloads ' not after May 20th, so skip the last two requests!
+    Next i
+
+    AssetsCY = InsurerType & strCY & "ASSETS_V"
+    AssetsPY = InsurerType & strPY & "ASSETS_V"
+    LiabsCY = InsurerType & strCY & "LIAB_V"
+    LiabsPY = InsurerType & strPY & "LIAB_V"
+
+    GainsAndLosses = "EXCAPGLOSS_V"  'L2005EXCAPGLOSS_V
+    NetInvIncome = "EXNETINVT_V"   'L2005EXNETINVT_V
+    
+    'Now process the special tables (histories, etc) where the Dump locations vary and / or SQL is specific or
+    SchedD1CY = strCY & "SCDPT1_V" '2012
+    SchedD1PY = strPY & "SCDPT1_V"  '2011
+    SchedD2S1 = strCY & "SCDPT2SN1_V"
+    SchedD2S2 = strCY & "SCDPT2SN2_V"
+    
+    If DOWNLOADHIST Then  '***************************  CREATE HISTORICAL SHEETS (LAST 6 YEARS) OF ALL SCHEDULE D RECORDS   ****************************
+        If CONFIRMHEADINGS Then
+            HistDCnt = 7 'these track the records downloaded, and are needed for offsets within Excel spreadsheets
+            HistPfdCnt = 7
+            HistCSCnt = 7
+        Else
+            HistDCnt = 0 'these track the records downloaded, and are needed for offsets within Excel spreadsheets
+            HistPfdCnt = 0
+            HistCSCnt = 0
+        End If
+        'first, get CY and PY info
+        '********************************** ADD CY AND PY DEBT RECORDS TO APPROPRIATE HISTORY SHEET ***********************************
+        strSQL = SQLForScheduleD1Hist(TableNm(6), ipCoCode, 2012) 'Sched D, CY
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2012 & " from Schedule D, Part 1 (Debt Securities). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistDCnt = HistDCnt + MoveRSToExcelFile(RS, "HistBonds", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistDCnt), XLWkBk, True)
+        LogMyDataDownload XLWkSht, TableNm(6), RS.RecordCount
+        
+    
+'        Set Rs = Nothing
+        strSQL = SQLForScheduleD1Hist(TableNm(7), ipCoCode, 2011) 'Sched D, PY
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 & " from Schedule D, Part 1 (Debt Securities). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistDCnt = HistDCnt + MoveRSToExcelFile(RS, "HistBonds", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistDCnt), XLWkBk)
+        LogMyDataDownload XLWkSht, TableNm(7), RS.RecordCount
+        
+'        Set Rs = Nothing
+        '******************************  ADD CY AND PY PFD STOCK RECORDS TO APPROPRIATE HISTORY SHEET *********************************
+        strSQL = SQLForScheduleD2S1Hist(TableNm(8), ipCoCode, 2012) 'SchedD2S1
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2012 & " from Schedule D, Part 2, Section 1 (Pfd Stk). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistPfdCnt = HistPfdCnt + MoveRSToExcelFile(RS, "HistPS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistPfdCnt), XLWkBk, True)
+        LogMyDataDownload XLWkSht, TableNm(8), RS.RecordCount
+        
+'        Set Rs = Nothing
+        If SepAcctDnld Then
+            strSQL = SQLForScheduleD2S1Hist(InsurerType & strPY & Mid(SchedD2S1, 4), ipCoCode, 2011)
+        Else
+            strSQL = SQLForScheduleD2S1Hist(InsurerType & strPY & Mid(SchedD2S1, 3), ipCoCode, 2011)
+        End If
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 & " from Schedule D, Part 2, Section 1 (Pfd Stk). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistPfdCnt = HistPfdCnt + MoveRSToExcelFile(RS, "HistPS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistPfdCnt), XLWkBk)
+        
+        If SepAcctDnld Then
+            LogMyDataDownload XLWkSht, InsurerType & strPY & Mid(SchedD2S1, 4), RS.RecordCount
+        Else
+            LogMyDataDownload XLWkSht, InsurerType & strPY & Mid(SchedD2S1, 3), RS.RecordCount
+        End If
+        
+'        Set Rs = Nothing
+        '************************** LASTLY, ADD CY AND PY COMMON STOCK RECORDS TO APPROPRIATE HISTORY SHEET ***************************
+        strSQL = SQLForScheduleD2S2Hist(InsurerType & SchedD2S2, ipCoCode, 2012)
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2012 & " from Schedule D, Part 2, Section 2 (Common Stk). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistCSCnt = HistCSCnt + MoveRSToExcelFile(RS, "HistCS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistCSCnt), XLWkBk, True)
+        LogMyDataDownload XLWkSht, InsurerType & SchedD2S2, RS.RecordCount
+'        Set Rs = Nothing
+        
+        If SepAcctDnld Then
+            strSQL = SQLForScheduleD2S2Hist(InsurerType & strPY & Mid(SchedD2S2, 4), ipCoCode, 2011)
+        Else
+            strSQL = SQLForScheduleD2S2Hist(InsurerType & strPY & Mid(SchedD2S2, 3), ipCoCode, 2011)
+        End If
+                                                   SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 & " from Schedule D, Part 2, Section 2 (Common Stk). . . "
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        HistCSCnt = HistCSCnt + MoveRSToExcelFile(RS, "HistCS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistCSCnt), XLWkBk)
+
+        If SepAcctDnld Then
+            LogMyDataDownload XLWkSht, InsurerType & strPY & Mid(SchedD2S2, 4), RS.RecordCount
+        Else
+            LogMyDataDownload XLWkSht, InsurerType & strPY & Mid(SchedD2S2, 3), RS.RecordCount
+        End If
+'        Set Rs = Nothing
+        If SepAcctDnld = 0 Then
+            SchedD1Hist = "SCDPT1_V" '2009
+            SchedD2S1Hist = "SCDPT2SN1_V"
+            SchedD2S2Hist = "SCDPT2SN2_V"
+            For i = 1 To 4  'get the historical Sched D into 1 sheet
+                strSQL = SQLForScheduleD1Hist(InsurerType & strPY & CStr(i) & SchedD1Hist, ipCoCode, 2011 - i)
+                                                           SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 - i & " from Schedule D, Part 1 (Debt Securities). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                HistDCnt = HistDCnt + MoveRSToExcelFile(RS, "HistBonds", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistDCnt), XLWkBk)
+                LogMyDataDownload XLWkSht, InsurerType & strPY & CStr(i) & SchedD1Hist, RS.RecordCount
+        
+'                Set Rs = Nothing
+                strSQL = SQLForScheduleD2S1Hist(InsurerType & strPY & CStr(i) & SchedD2S1Hist, ipCoCode, 2011 - i)
+                                                           SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 - i & " from Schedule D, Part 2, Section 1 (Pfd Stk). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                HistPfdCnt = HistPfdCnt + MoveRSToExcelFile(RS, "HistPS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistPfdCnt), XLWkBk)
+                LogMyDataDownload XLWkSht, InsurerType & strPY & CStr(i) & SchedD2S1Hist, RS.RecordCount
+             
+'                Set Rs = Nothing
+                strSQL = SQLForScheduleD2S2Hist(InsurerType & strPY & CStr(i) & SchedD2S2Hist, ipCoCode, 2011 - i)
+                                                           SysCmd acSysCmdSetStatus, "Moving Hist Records from " & 2011 - i & " from Schedule D, Part 2, Section 2 (Common Stk). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                HistCSCnt = HistCSCnt + MoveRSToExcelFile(RS, "HistCS", ipCoCode, TARGETXLFILE, "A" & CStr(2 + HistCSCnt), XLWkBk)
+                LogMyDataDownload XLWkSht, InsurerType & strPY & CStr(i) & SchedD2S2Hist, RS.RecordCount
+        
+'                Set Rs = Nothing
+            Next i
+        End If
+        XLWkBk.Sheets("HistBonds").Range("B1").Formula = "=COUNTA(C2:C186390)" 'rewrite a formula that gets stepped on.
+        XLWkBk.Sheets("HistPS").Range("B1").Formula = "=COUNTA(C2:C33300)" 'rewrite a formula that gets stepped on.
+        XLWkBk.Sheets("HistCS").Range("B1").Formula = "=COUNTA(C2:C33360)" 'rewrite a formula that gets stepped on.
+        
+    Else
+        If DOIRun = 0 Then
+'            ErrCode = SheetFound(XLWkBk, "HistBonds", True)
+'            ErrCode = SheetFound(XLWkBk, "HistCS", True)
+'            ErrCode = SheetFound(XLWkBk, "HistPS", True)
+'            ErrCode = SheetFound(XLWkBk, "HistBondFilter", True)
+            If SheetFound(XLWkBk, "HistBonds", True) = 1 Then XLApp.Worksheets("HistBonds").Visible = xlSheetHidden
+            If SheetFound(XLWkBk, "HistCS", True) Then XLApp.Worksheets("HistCS").Visible = xlSheetHidden
+            If SheetFound(XLWkBk, "HistPS", True) Then XLApp.Worksheets("HistPS").Visible = xlSheetHidden
+            If SheetFound(XLWkBk, "HistBond", True) Then XLApp.Worksheets("HistBondFilter").Visible = xlSheetHidden
+        End If
+    End If
+    
+    '**************************   ASSETS AND LIABILITIES   *************************
+    SysCmd acSysCmdSetStatus, "Moving Records From This Year's Assets Page. . . "
+    strSQL = SQLForAssets(AssetsCY, ipCoCode, SepAcctDnld)  'the assets schedule hasn't changed, fields are still the same. Thus only 1 proc needed.
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "Assets-" & cCY, ipCoCode, TARGETXLFILE, "B2", XLWkBk
+    Else
+        If CONFIRMHEADINGS Then
+            CopyRecordsetToExcelFile RS, "Assets", ipCoCode, TARGETXLFILE, "AX4", XLWkBk
+        Else
+            CopyRecordsetToExcelFile RS, "Assets", ipCoCode, TARGETXLFILE, "P4", XLWkBk
+        End If
+    End If
+    LogMyDataDownload XLWkSht, AssetsCY, RS.RecordCount
+    
+'    Set Rs = Nothing
+    
+    SysCmd acSysCmdSetStatus, "Moving Info From Prior Year's Assets Page. . . "
+    strSQL = SQLForAssets(AssetsPY, ipCoCode, SepAcctDnld)
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "Assets-" & cPY, ipCoCode, TARGETXLFILE, "B2", XLWkBk
+    Else
+        If CONFIRMHEADINGS Then
+            CopyRecordsetToExcelFile RS, "Assets-" & strPY, ipCoCode, TARGETXLFILE, "AK4", XLWkBk
+        Else
+            CopyRecordsetToExcelFile RS, "Assets-" & strPY, ipCoCode, TARGETXLFILE, "P4", XLWkBk
+        End If
+    End If
+    LogMyDataDownload XLWkSht, AssetsPY, RS.RecordCount
+    'now dump the past 5 years of assets into one spreadsheet!!!
+    If DOIRun = 0 And CONFIRMHEADINGS = 0 And SepAcctDnld = 0 Then 'only run this for a typical CoCode download
+        'Current Year
+        SysCmd acSysCmdSetStatus, "Moving Records From This Year's Assets Page. . . "
+        strSQL = SQLForAssets(AssetsCY, ipCoCode, SepAcctDnld)   'the assets schedule hasn't changed, fields are still the same. Thus only 1 proc needed.
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        CopyRecordsetToExcelFile RS, "MyIARSum", ipCoCode, TARGETXLFILE, "P8", XLWkBk
+        
+        'Prior Year
+        SysCmd acSysCmdSetStatus, "Moving Info From Prior Year's Assets Page. . . "
+        strSQL = SQLForAssets(AssetsPY, ipCoCode, SepAcctDnld)
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        CopyRecordsetToExcelFile RS, "MyIARSum", ipCoCode, TARGETXLFILE, "AA8", XLWkBk
+        
+        'PY1
+        AssetsPY = InsurerType & strPY & "1" & "ASSETS_V"
+        SysCmd acSysCmdSetStatus, "Moving Info From Prior Year1's Assets Page. . . "
+        strSQL = SQLForAssets(AssetsPY, ipCoCode, SepAcctDnld)
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        CopyRecordsetToExcelFile RS, "MyIARSum", ipCoCode, TARGETXLFILE, "AL8", XLWkBk
+        
+        'PY2
+        AssetsPY = InsurerType & strPY & "2" & "ASSETS_V"
+
+        SysCmd acSysCmdSetStatus, "Moving Info From Prior Year2's Assets Page. . . "
+        strSQL = SQLForAssets(AssetsPY, ipCoCode, SepAcctDnld)
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        CopyRecordsetToExcelFile RS, "MyIARSum", ipCoCode, TARGETXLFILE, "AW8", XLWkBk
+        'PY3
+        AssetsPY = InsurerType & strPY & "3" & "ASSETS_V"
+        
+        SysCmd acSysCmdSetStatus, "Moving Info From Prior Year3's Assets Page. . . "
+        strSQL = SQLForAssets(AssetsPY, ipCoCode, SepAcctDnld)
+        Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+        CopyRecordsetToExcelFile RS, "MyIARSum", ipCoCode, TARGETXLFILE, "BH8", XLWkBk
+        'reset to correct value for rest of report
+        AssetsPY = InsurerType & strPY & "ASSETS_V"
+    
+    End If
+'    Set Rs = Nothing
+    SysCmd acSysCmdSetStatus, "Moving Info From This Year's Liability Page. . . "
+    strSQL = SQLForLiabs(LiabsCY, ipCoCode, InsurerType, SepAcctDnld)   'the liability schedule hasn't changed, fields are still the same. Thus only 1 proc needed.
+
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "Liab-" & cCY, ipCoCode, TARGETXLFILE, "B2", XLWkBk, True
+    Else
+        If CONFIRMHEADINGS Then
+            CopyRecordsetToExcelFile RS, "Liab", ipCoCode, TARGETXLFILE, "BD9", XLWkBk, False
+        Else
+            CopyRecordsetToExcelFile RS, "Liab", ipCoCode, TARGETXLFILE, "M9", XLWkBk, False
+        End If
+    End If
+    LogMyDataDownload XLWkSht, LiabsCY, RS.RecordCount
+
+'    Set Rs = Nothing
+    SysCmd acSysCmdSetStatus, "Moving Info From Prior Year's Liability Page. . . "
+    strSQL = SQLForLiabs(LiabsPY, ipCoCode, InsurerType, SepAcctDnld)
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "Liab-" & cPY, ipCoCode, TARGETXLFILE, "B2", XLWkBk, True
+    Else
+        If CONFIRMHEADINGS Then
+            CopyRecordsetToExcelFile RS, "Liab-" & strPY, ipCoCode, TARGETXLFILE, "BI9", XLWkBk, False
+        Else
+            CopyRecordsetToExcelFile RS, "Liab-" & strPY, ipCoCode, TARGETXLFILE, "M9", XLWkBk, False
+        End If
+    End If
+    LogMyDataDownload XLWkSht, LiabsPY, RS.RecordCount
+'    Set Rs = Nothing
+
+    '**************************************   GAINS AND LOSSES   *****************************************************
+    If SepAcctDnld = 0 Then
+        For i = 0 To 3
+            SysCmd acSysCmdSetStatus, "Moving Info From Gains and Losses for " & FirstYearForGainsLosses + i & " . . . "
+            strSQL = SQLForGainsAndLosses(InsurerType & FirstYearForGainsLosses + i & GainsAndLosses, ipCoCode)
+            Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+            Select Case i
+                Case 0
+                    ReportAddr = "X8"
+                    If DOIRun Then ReportAddr = "C2"
+                Case 1
+                    ReportAddr = "X35"
+                    If DOIRun Then ReportAddr = "C29"
+                
+                Case 2
+                    ReportAddr = "X61"
+                    If DOIRun Then ReportAddr = "C55"
+                Case 3
+                    ReportAddr = "X85"
+                    If DOIRun Then ReportAddr = "C79"
+                Case Else
+            End Select
+            
+    '        If DOIRun Then ReportAddr = Left(ReportAddr, 2) & "2"
+    
+            CopyRecordsetToExcelFile RS, "G+L", ipCoCode, TARGETXLFILE, ReportAddr, XLWkBk
+            LogMyDataDownload XLWkSht, InsurerType & FirstYearForGainsLosses + i & GainsAndLosses, RS.RecordCount
+'            Set Rs = Nothing
+        Next i
+    End If
+    SysCmd acSysCmdSetStatus, "Moving Info From Gains and Losses for Current Year. . . "
+    strSQL = SQLForGainsAndLosses(InsurerType & strCY & GainsAndLosses, ipCoCode)
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "G+L", ipCoCode, TARGETXLFILE, "C106", XLWkBk, True
+    Else
+        CopyRecordsetToExcelFile RS, "G+L", ipCoCode, TARGETXLFILE, "X111", XLWkBk, False
+    End If
+    LogMyDataDownload XLWkSht, InsurerType & strCY & GainsAndLosses, RS.RecordCount
+    
+'    Set Rs = Nothing
+
+    '**************************************   INVESTMENT INCOME  *****************************************************
+    If SepAcctDnld = 0 Then
+
+        For i = 0 To 3
+            SysCmd acSysCmdSetStatus, "Moving Info From " & InsurerType & FirstYearForGainsLosses + i & NetInvIncome & " for " & FirstYearForGainsLosses + i & " . . . "
+            strSQL = SQLForInvestmentIncome(InsurerType & FirstYearForGainsLosses + i & NetInvIncome, ipCoCode)
+            Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+            Select Case i
+                Case 0
+                    ReportAddr = "AW44"
+                    If DOIRun Then ReportAddr = "AE3"
+                Case 1
+                    ReportAddr = "AP44"
+                    If DOIRun Then ReportAddr = "X3"
+                Case 2
+                    ReportAddr = "AI44"
+                    If DOIRun Then ReportAddr = "Q3"
+                Case 3
+                    ReportAddr = "AB44"
+                    If DOIRun Then ReportAddr = "J3"
+                Case Else
+            End Select
+            
+            'If DOIRun Then ReportAddr = Left(ReportAddr, 2) & "2"
+            
+            CopyRecordsetToExcelFile RS, "HistInc", ipCoCode, TARGETXLFILE, ReportAddr, XLWkBk
+            LogMyDataDownload XLWkSht, InsurerType & FirstYearForGainsLosses + i & NetInvIncome, RS.RecordCount
+    
+'            Set Rs = Nothing
+        Next i
+    End If
+    SysCmd acSysCmdSetStatus, "Moving Info From " & InsurerType & strCY & NetInvIncome & " for Current Year. . . "
+    strSQL = SQLForInvestmentIncome(InsurerType & strCY & NetInvIncome, ipCoCode)
+    Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    
+    If DOIRun Then
+        CopyRecordsetToExcelFile RS, "HistInc", ipCoCode, TARGETXLFILE, "C3", XLWkBk, True
+    Else
+        CopyRecordsetToExcelFile RS, "HistInc", ipCoCode, TARGETXLFILE, "U44", XLWkBk, False
+    End If
+    
+    LogMyDataDownload XLWkSht, InsurerType & strCY & NetInvIncome, RS.RecordCount
+
+    'Now Finish the normal processing
+    RS.Close
+    
+    If CONFIRMHEADINGS = 1 Or CLOSEONEXIT = 0 Then GoTo FinalFinal
+
+    'now hide the report spreadsheets when there is no data
+    If DOIRun = 0 Then
+        HideIrrelevantReports XLWkBk, TabNm
+        XLWkSht.Activate
+        XLWkSht.Range("A1").Select
+    End If
+    
+    SysCmd acSysCmdSetStatus, "Calculating Spreadsheet. . . "
+    XLApp.Calculation = xlCalculationAutomatic
+    XLApp.AlertBeforeOverwriting = False
+    SysCmd acSysCmdSetStatus, "Saving New Insurer Spreadsheet. . . "
+    XLWkBk.Close savechanges:=True, FileName:=TARGETXLFILE
+    XLApp.Quit
+    SysCmd acSysCmdSetStatus, "Transfer of data from I-SITE to Excel data sheet for CoCode " & ipCoCode & " is complete! "
+    
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error " & Err.Number & ", " & Err.Description
+    Err.Clear
+    
+MyExit:
+    Set RS = Nothing
+    Set ThisDB = Nothing
+    Set XLWkSht = Nothing
+    Set XLWkBk = Nothing
+    Set XLApp = Nothing
+    Set n = Nothing
+FinalFinal:
+End Sub
+Sub CopyRSHeaders(ByRef ipRS As DAO.Recordset, ByRef ipWkSht As Excel.Worksheet, ipNWCornerLoc As String)
+Dim MyDumpRng As Excel.Range
+Dim i As Integer
+Dim FldName As Object
+    i = 0
+    Set MyDumpRng = ipWkSht.Range(ipNWCornerLoc)
+    For Each FldName In ipRS.Fields
+        MyDumpRng.Offset(0, i).Value = FldName.name
+        i = i + 1
+    Next FldName
+
+MyExit:
+    Set MyDumpRng = Nothing
+    Set FldName = Nothing
+End Sub
+
+Sub CopyRSRowTitles(ByRef ipRS As DAO.Recordset, ByRef ipWkSht As Excel.Worksheet, ipNWCornerLoc As String)
+Dim MyDumpRng As Excel.Range
+Dim i As Integer
+Dim fldName As Object
+    i = 0
+    Set MyDumpRng = ipWkSht.Range(ipNWCornerLoc)
+
+    For Each fldName In ipRS.Fields
+        MyDumpRng.Offset(0, i).Value = fldName.Name
+        i = i + 1
+    Next fldName
+
+MyExit:
+    Set MyDumpRng = Nothing
+    Set fldName = Nothing
+End Sub
+
+Sub HideIrrelevantReports(ByRef ipWrkBk As Excel.Workbook, ByRef ipTabNm() As String)   'ByRef ipXLApp As Application.Excel,
+On Error GoTo ErrorHandler
+Dim n As Object
+    
+    For Each n In ipWrkBk.Worksheets
+        If n.name = ipTabNm(8) And n.Visible = False Then ' if no preferred stock
+            ipWrkBk.Worksheets("3PSInd").Visible = False
+        ElseIf n.name = ipTabNm(9) And n.Visible = False Then 'if no common stock
+            ipWrkBk.Worksheets("8SInd").Visible = False
+            ipWrkBk.Worksheets("8MutFnd").Visible = False
+        ElseIf (n.name = "QtrlyAcqns" Or n.name = "QtrlySales") And n.Visible = False Then 'if no quarterly data
+            ipWrkBk.Worksheets("QtrlyMoves").Visible = False
+        ElseIf n.name = ipTabNm(1) And n.Visible = False Then ' no current year B1-Mrtgs
+            ipWrkBk.Worksheets("9MgSt").Visible = False
+        
+        ElseIf n.name = "Convexity" Then
+            ipWrkBk.Worksheets("Convexity").Visible = False
+        End If
+        
+    Next n
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    SysCmd acSysCmdSetStatus, "CoCode Download did not complete due to error " & Err.Number & ", " & Err.Description
+    Err.Clear
+    
+MyExit:
+    Set n = Nothing
+End Sub
+
+Sub LogMyDataDownload(ipWkSht As Excel.Worksheet, ipTableDownLoad As String, ipRecsDownloaded As Long)  ' "Assumes", 1
+Dim MyLogLoc As String
+    If DOIRun Then
+        MyLogLoc = "J2"
+    Else
+        MyLogLoc = "X75"
+    End If
+    ipWkSht.Range(MyLogLoc).Offset(MyTableNum, 0) = ipTableDownLoad
+    ipWkSht.Range(MyLogLoc).Offset(MyTableNum, 1) = ipRecsDownloaded
+    MyTableNum = MyTableNum + 1
+End Sub
+
+Sub AssignArrayValues(ipInsurerType As String, ipCoCode As Double, ByRef ipTableNm() As String, ByRef ipWhereas() As String, ByRef ipTabNm() As String, ByRef ipDumpCell() As String, ByRef ipSchedCount As Byte)
+'note that the ByRef variables are initially empty and filled here before being sent back loaded
+On Error GoTo ErrorHandler
+Dim strWhere0 As String
+Dim strWhere1 As String
+Dim strWhere2 As String
+Dim strCY As String
+Dim strPY As String
+Dim i As Byte
+Dim strDefCellLoc As String
+Dim strMortgDefCellLoc As String
+Dim strDLDefCellLoc As String
+
+'Const DefCellLoc  = "A2" 'When debugged, it should be "A2"
+'Const strMortgDefCellLoc = "A3" 'When debugged, it should be "A3"
+'Const DLDefCellLoc  = "A6" 'When debugged, it should be "A3"
+Const cCY = "2012"
+Const cPY = "2011"
+    
+    If CONFIRMHEADINGS Then
+        strDefCellLoc = "A6"
+        strMortgDefCellLoc = "A7"
+        strDLDefCellLoc = "A10"
+    Else 'dump the rows 3 or 4 rows down, so as not to step on the existing row headings
+        strDefCellLoc = "A2"
+        strMortgDefCellLoc = "A3"
+        strDLDefCellLoc = "A6"
+    End If
+    
+    If SepAcctDnld Then
+        strCY = "CYA"
+        strPY = "PYA"
+    Else
+        strCY = "CY"
+        strPY = "PY"
+    End If
+
+    strWhere0 = " WHERE COCODE = " & ipCoCode & " "
+    strWhere1 = " WHERE COCODE = " & ipCoCode & " AND LINE_NO Not Like '*99999' "
+    strWhere2 = " WHERE COCODE = " & ipCoCode & " AND LINE_NO Not Like '*99999' AND LINE_NO NOT LIKE '*99998' AND LINE_NO NOT LIKE '*99997' "
+    i = 0
+    ipTableNm(i) = ipInsurerType & strCY & "SCAPT1_V"
+            'WhereAs(0) = " WHERE " & iptablenm(0) & ".COCODE = " & ipCoCode & " AND " & iptablenm(0) & ".LINE_NO Not Like '*99999' ; "
+        ipWhereas(i) = strWhere1 '" WHERE " & " COCODE = " & ipCoCode & " AND " & " LINE_NO Not Like '*99999' ; "
+            ipTabNm(i) = "A1-REst"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCBPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "B1" '& cCY
+                ipDumpCell(i) = strMortgDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCBPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "B1-PY"
+                ipDumpCell(i) = strMortgDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCBAPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "BA" '& cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDAPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DA" '& cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCDAPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DA-PY" ' & cPY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDPT1_V" '2012
+        ipWhereas(i) = strWhere1 & " ORDER BY ORDR "
+            ipTabNm(i) = "Bonds" '& cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCDPT1_V" '2010
+        ipWhereas(i) = strWhere1 & " ORDER BY ORDR "
+            ipTabNm(i) = "Bonds-PY" ' & cPY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDPT2SN1_V"
+        ipWhereas(i) = strWhere1 & " ORDER BY ORDR "
+            ipTabNm(i) = "PfdStk" ' & cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDPT2SN2_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "CmnStk" ' & cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCEPT1_V"
+        ipWhereas(i) = strWhere2  'note the expanded WHERE clause!!
+            ipTabNm(i) = "E1" ' & cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCEPT2_V"
+        ipWhereas(i) = strWhere2  'note the expanded WHERE clause!!
+            ipTabNm(i) = "E2" ' & cCY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTASN1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-A1"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTASN2_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-A2"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTBSN1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-B1"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTBSN2_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-B2"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTCSN1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-C1"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDBPTCSN2_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "DB-C2"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDLPT1_V"
+        ipWhereas(i) = strWhere1 'correct
+            ipTabNm(i) = "DL1"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDLPT2_V"
+        ipWhereas(i) = strWhere1 'correct
+            ipTabNm(i) = "DL2"
+                ipDumpCell(i) = strDLDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCDPT2SN1_V"
+        ipWhereas(i) = strWhere1 & " ORDER BY ORDR "
+            ipTabNm(i) = "PfdStk-PY" ' & cPY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCDPT2SN2_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "CmnStk-PY" ' & cPY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "SCBAPT1_V"
+        ipWhereas(i) = strWhere1
+            ipTabNm(i) = "BA-PY" ' & cPY
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDPT3_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "CYAcqns"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "SCDPT4_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "CYSales"
+                ipDumpCell(i) = strDefCellLoc
+    '********************************
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "QSCDPT3_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "PYQAcqns"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strPY & "QSCDPT4_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "PYQSales"
+                ipDumpCell(i) = strDefCellLoc
+    'what we don't need are PYSCDPT3_V and PYSCDPT4_V schedules
+    '********  THESE ALWAYS HAVE TO GO LAST!!!! *************
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "QSCDPT3_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "QtrlyAcqns"
+                ipDumpCell(i) = strDefCellLoc
+    i = i + 1
+    ipTableNm(i) = ipInsurerType & strCY & "QSCDPT4_V"
+        ipWhereas(i) = strWhere2 'note the expanded WHERE clause!!
+            ipTabNm(i) = "QtrlySales"
+                ipDumpCell(i) = strDefCellLoc
+    
+    'Now return the value back to the calling procedure as MaxAutoDownloads
+    ipSchedCount = i
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error!, Err# " & Err.Number & ", " & Err.Description
+    SysCmd acSysCmdSetStatus, "Err# " & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+End Sub
+
+Sub CopyRecordsetToExcelFile(ByRef ipRSet As Recordset, ipSheetName As String, ipCoCode As Double, ipWrkbookName As String, ipInitCell As String, ByRef ipXLWkBk As Excel.Workbook, Optional ipProvideHeaders As Boolean = False)
+'ByRef Data() As Variant, ByVal ROWCOUNT As Integer, ByVal COLCOUNT As Integer, Optional FirstCell As String, Optional SummaryFileName As String, Optional SheetName As String)
+'this function takes a two dimentional array of any size, and moves the data to an excel spreadsheet
+'one can specify the top left cell, the file name, and the spreadsheet name
+'file is closed once the data is written
+Dim XLWkSht As Excel.Worksheet
+Dim MyRng As Excel.Range
+
+Dim i, j As Byte
+Dim TotalQrys As Long
+Dim TotalRecs As Long
+Dim FirstCell As String
+Dim FoundSheet As Boolean
+Dim MyReturnValue As Long
+Dim CUSIPLoc As String
+Const CYCUSIPLoc = "BY2"
+Const PYCUSIPLoc = "BV2"
+Const HeadingRow = 0
+
+    If Len(ipInitCell) = 0 Then
+        FirstCell = "A7"
+    Else
+        FirstCell = ipInitCell
+    End If
+    
+    'Find and move to the correct worksheet.  If the worksheet doesn't exist, create it
+    For i = 1 To ipXLWkBk.Worksheets.Count
+        If ipXLWkBk.Worksheets(i).name = ipSheetName Then
+            Set XLWkSht = ipXLWkBk.Worksheets(i)
+            FoundSheet = True
+            Exit For
+        End If
+    Next i
+    If FoundSheet Then
+'        Set XLWksht = XLWkbk.Worksheets(i)
+        XLWkSht.Activate
+    Else 'the worksheet wasn't found in the file, so add it
+        Set XLWkSht = ipXLWkBk.Worksheets.Add
+        XLWkSht.name = ipSheetName
+        XLWkSht.Activate
+    End If
+    
+    'just move the data!
+    XLWkSht.Range(FirstCell).CopyFromRecordset ipRSet
+    If UCase(ipSheetName) = "BONDS" Then
+        CUSIPLoc = CYCUSIPLoc
+    Else
+        CUSIPLoc = PYCUSIPLoc
+    End If
+    If ipRSet.RecordCount > 0 And UCase(ipSheetName) = "BONDS" Or UCase(ipSheetName) = "BONDS-PY" Then
+        XLWkSht.Range(CUSIPLoc).Formula = "=CUSIP(1,E2,F2,G2)"
+        XLWkSht.Range(CUSIPLoc).Offset(0, 1).Formula = "=CUSIP(2,E2,F2)"
+        XLWkSht.Range(CUSIPLoc).Offset(0, 2).Formula = "=CUSIP(3,E2)"
+        XLWkSht.Range(XLWkSht.Range(CUSIPLoc), XLWkSht.Range(CUSIPLoc).Offset(0, 2)).Copy
+        XLWkSht.Range(XLWkSht.Range(CUSIPLoc), XLWkSht.Range(CUSIPLoc).Offset(ipRSet.RecordCount - 1, 0)).PasteSpecial xlPasteFormulas
+    End If
+    If ipRSet.RecordCount = 0 Then 'hide the spreadsheet
+        XLWkSht.Visible = xlSheetHidden
+    End If
+    If DOIRun Or ipProvideHeaders Then 'add the headings
+        Set MyRng = XLWkSht.Range(FirstCell)
+        If MyRng.Row <> 1 Then 'this dump is not on the top row, so dump the headings!
+            CopyRSHeaders ipRSet, XLWkSht, MyRng.Offset(-1, 0).Address
+        End If
+    End If
+    If ipRSet.RecordCount > 0 Then 'Make the spreadsheet visible!
+        XLWkSht.Visible = xlSheetVisible
+    End If
+    Set MyRng = Nothing
+    Set XLWkSht = Nothing
+End Sub
+Function MoveRSToExcelFile(ByRef ipRSet As Recordset, ipSheetName As String, ipCoCode As Double, ipWrkbookName As String, ipInitCell As String, ByRef ipXLWkBk As Excel.Workbook, Optional ipProvideHeaders As Boolean = False) As Long
+On Error GoTo ErrorHandler
+'ByRef Data() As Variant, ByVal ROWCOUNT As Integer, ByVal COLCOUNT As Integer, Optional FirstCell As String, Optional SummaryFileName As String, Optional SheetName As String)
+'this function takes a two dimentional array of any size, and moves the data to an excel spreadsheet
+'one can specify the top left cell, the file name, and the spreadsheet name
+'file is closed once the data is written
+'Dim xlApp As Excel.Application
+'Dim XLWkbk As Excel.Workbook
+Dim XLWkSht As Excel.Worksheet
+Dim MyRng As Excel.Range
+Dim i, j As Byte
+Dim TotalQrys As Long
+Dim TotalRecs As Long
+Dim FirstCell As String
+Dim FoundSheet As Boolean
+Dim MyReturnValue As Long
+
+Const HeadingRow = 0
+
+    If Len(ipInitCell) = 0 Then
+        FirstCell = "A7"
+    Else
+        FirstCell = ipInitCell
+    End If
+    
+    'Find and move to the correct worksheet.  If the worksheet doesn't exist, create it
+    For i = 1 To ipXLWkBk.Worksheets.Count
+        If ipXLWkBk.Worksheets(i).name = ipSheetName Then
+            Set XLWkSht = ipXLWkBk.Worksheets(i)
+            FoundSheet = True
+            Exit For
+        End If
+    Next i
+    If FoundSheet Then
+'        Set XLWksht = XLWkbk.Worksheets(i)
+        XLWkSht.Activate
+    Else 'the worksheet wasn't found in the file, so add it
+        Set XLWkSht = ipXLWkBk.Worksheets.Add
+        XLWkSht.name = ipSheetName
+        XLWkSht.Activate
+    End If
+    'ipSheetName = XLWkSht.Name
+    'just move the data!
+    XLWkSht.Range(FirstCell).CopyFromRecordset ipRSet
+    If ipProvideHeaders Then 'add the headings
+        Set MyRng = XLWkSht.Range(FirstCell)
+        If MyRng.Row <> 1 Then 'this dump is not on the top row, so dump the headings!
+            CopyRSHeaders ipRSet, XLWkSht, MyRng.Offset(-1, 0).Address
+        End If
+    End If
+
+    MoveRSToExcelFile = ipRSet.RecordCount
+    
+    If ipRSet.RecordCount = 0 Then 'hide the spreadsheet
+        XLWkSht.Visible = xlSheetHidden
+    End If
+    If ipRSet.RecordCount > 0 Then 'Make the spreadsheet visible!
+        XLWkSht.Visible = xlSheetVisible
+    End If
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    SysCmd acSysCmdSetStatus, " MoveRSToExcelFile ERROR!! Error#: " & Err.Number & ", " & Err.Description & "."
+    Err.Clear
+
+MyExit:
+    Set XLWkSht = Nothing
+    Set MyRng = Nothing
+End Function
+
+Function SQLForScheduleD1Hist(ipTableName As String, ipCoCode As Double, ipYear As Long) As String
+Dim strSQL As String
+    
+    strSQL = "  "
+    strSQL = strSQL & " SELECT " & ipTableName & ".YEAR, " & ipTableName & ".COCODE, " & ipTableName & ".LINE_NO,"
+    strSQL = strSQL & ipTableName & ".CUSIP_ISSUER & " & ipTableName & ".CUSIP_ISSUE & " & ipTableName & ".CUSIP_CHECK_DIGIT AS CUSIP, "
+    strSQL = strSQL & ipTableName & ".DESCRIPTION, "
+    strSQL = strSQL & ipTableName & ".FOREIGN, "
+    strSQL = strSQL & ipTableName & ".BOND_CHAR, "
+    strSQL = strSQL & ipTableName & ".NAIC_DESIGNATION, "
+    strSQL = strSQL & ipTableName & ".ACTUAL_COST, "
+    strSQL = strSQL & ipTableName & ".RATE_USED_TO_OBTAIN_FAIR_VAL, "
+    strSQL = strSQL & ipTableName & ".FAIR_VAL, "
+    strSQL = strSQL & ipTableName & ".PAR_VALUE, "
+    strSQL = strSQL & ipTableName & ".BOOKADJUST_CARRY_VAL, "
+    strSQL = strSQL & ipTableName & ".UNRLZD_VAL_INCREASEDECREASE, "
+    strSQL = strSQL & ipTableName & ".CURR_YEARS_AMORTIZATION_ACCRET, "
+    strSQL = strSQL & ipTableName & ".CURR_YEARS_OTH_THAN_TEMPORARY, "
+    strSQL = strSQL & ipTableName & ".TOT_FOREIGN_EXCHANGE_CHANGE_IN, "
+    strSQL = strSQL & ipTableName & ".INTEREST_RATE, "
+    strSQL = strSQL & ipTableName & ".EFF_RATE_INTEREST, "
+    strSQL = strSQL & ipTableName & ".ADMTD_AMT_DUE_AND_ACRD, "
+    strSQL = strSQL & ipTableName & ".DTE_ACQRD, "
+    If ipYear = 2011 Or ipYear = 2012 Then
+        strSQL = strSQL & ipTableName & ".MATUR_DTE, "
+    Else
+        strSQL = strSQL & ipTableName & ".MATURITY_DATE, "
+    End If
+    strSQL = strSQL & ipTableName & ".ST_IDENTIFIER, "
+    If ipYear = 2012 Then
+        strSQL = strSQL & ipTableName & ".WHEN_PAID_INTEREST, "
+        strSQL = strSQL & ipTableName & ".CODE, "
+        strSQL = strSQL & ipTableName & ".AMT_REC_DUR_YR, "
+        strSQL = strSQL & ipTableName & ".FAIR_VAL_HIERARCHY_LEVEL_AND_M & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2009 Or ipYear = 2010 Or ipYear = 2011 Then
+        strSQL = strSQL & ipTableName & ".WHEN_PAID_INTEREST, "
+        strSQL = strSQL & ipTableName & ".CODE, "
+        strSQL = strSQL & ipTableName & ".AMT_REC_DUR_YR, "
+        strSQL = strSQL & ipTableName & ".METHOD_CODE_METHOD_USED_TO_OBT & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2008 Then
+        strSQL = strSQL & ipTableName & ".WHEN_PAID_INTEREST, "
+        strSQL = strSQL & ipTableName & ".CODE, "
+        strSQL = strSQL & ipTableName & ".AMT_REC_DUR_YR, "
+        strSQL = strSQL & ipTableName & ".METHOD_USED_TO_OBTAIN_FAIR_VAL " 'note that following fields are extra from more recent year(s)
+    Else
+        strSQL = strSQL & ipTableName & ".HOW_PAID, "
+        strSQL = strSQL & ipTableName & ".ASTERISK, "
+        strSQL = strSQL & ipTableName & ".GRS_AMT_RCVD_YR " 'note - no commas here
+    End If
+    
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE (((" & ipTableName & ".COCODE)=" & ipCoCode & ") AND ((" & ipTableName & ".LINE_NO) Not Like '*99999')) " 'just this is good for Life, Health, Fraternal, P/C, Title
+    strSQL = strSQL & " ORDER BY " & ipTableName & ".ORDR ; "
+    SQLForScheduleD1Hist = strSQL
+
+End Function
+
+Function SQLForScheduleD2S1Hist(ipTableName As String, ipCoCode As Double, ipYear As Long) As String
+Dim strSQL As String
+'SELECT LCYSCDPT2SN1_V.COCODE, LCYSCDPT2SN1_V.LNCODE, LCYSCDPT2SN1_V.LINE_NO, LCYSCDPT2SN1_V.ORDR, LCYSCDPT2SN1_V.LAST_UPDATE,
+'LCYSCDPT2SN1_V.ACTIVE_ROW, LCYSCDPT2SN1_V.YEAR,
+'LCYSCDPT2SN1_V.CUSIP_ISSUER, LCYSCDPT2SN1_V.CUSIP_ISSUE, LCYSCDPT2SN1_V.CUSIP_CHECK_DIGIT, LCYSCDPT2SN1_V.DESCRIPTION,
+'LCYSCDPT2SN1_V.CODE, LCYSCDPT2SN1_V.FOREIGN,
+'LCYSCDPT2SN1_V.NO_OF_SHARES, LCYSCDPT2SN1_V.PAR_VAL_PER_SHARE, LCYSCDPT2SN1_V.RATE_PER_SHARE, LCYSCDPT2SN1_V.BOOKADJUST_CARRY_VAL,
+'LCYSCDPT2SN1_V.RATE_PER_SHARE_USED_TO_OBTAIN, LCYSCDPT2SN1_V.FAIR_VAL, LCYSCDPT2SN1_V.ACTUAL_COST, LCYSCDPT2SN1_V.DIV_DECL_UNPAID,
+'LCYSCDPT2SN1_V.DIV_AMT_RCVD, LCYSCDPT2SN1_V.NONADMITTED_DECLARED_BUT_UNPAI, LCYSCDPT2SN1_V.UNRLZD_VAL_INCREASE_DECREASE,
+'LCYSCDPT2SN1_V.CURR_YEARS_AMORTIZATION_ACCRET, LCYSCDPT2SN1_V.CURR_YEARS_OTH_THAN_TEMPORARY, LCYSCDPT2SN1_V.TOT_CHANGE_IN_BACV,
+'LCYSCDPT2SN1_V.TOT_FOREIGN_EXCHANGE_CHANGE_IN, LCYSCDPT2SN1_V.NAIC_DESIGNATION,
+'LCYSCDPT2SN1_V.DTE_ACQRD, LCYSCDPT2SN1_V.METHOD_CODE_METHOD_USED_TO_OBT, LCYSCDPT2SN1_V.SOURCE_METHOD_USED_TO_OBTAIN_F
+'FROM LCYSCDPT2SN1_V
+'WHERE (((LCYSCDPT2SN1_V.COCODE)=60186) AND ((LCYSCDPT2SN1_V.LINE_NO) Not Like "*99999"))
+'ORDER BY LCYSCDPT2SN1_V.COCODE, LCYSCDPT2SN1_V.ORDR;
+    strSQL = " "
+    strSQL = strSQL & " SELECT " & ipTableName & ".YEAR, "
+    strSQL = strSQL & ipTableName & ".COCODE, "
+    strSQL = strSQL & ipTableName & ".LINE_NO, "
+    strSQL = strSQL & ipTableName & ".CUSIP_ISSUER & " & ipTableName & ".CUSIP_ISSUE & " & ipTableName & ".CUSIP_CHECK_DIGIT AS CUSIP, "
+    strSQL = strSQL & ipTableName & ".DESCRIPTION, "
+    strSQL = strSQL & ipTableName & ".CODE, "
+    strSQL = strSQL & ipTableName & ".FOREIGN, "
+    strSQL = strSQL & ipTableName & ".NO_OF_SHARES, "
+    strSQL = strSQL & ipTableName & ".PAR_VAL_PER_SHARE, "
+    strSQL = strSQL & ipTableName & ".RATE_PER_SHARE, "
+    strSQL = strSQL & ipTableName & ".BOOKADJUST_CARRY_VAL, "
+    strSQL = strSQL & ipTableName & ".RATE_PER_SHARE_USED_TO_OBTAIN, "
+    strSQL = strSQL & ipTableName & ".FAIR_VAL, "
+    strSQL = strSQL & ipTableName & ".ACTUAL_COST, "
+    strSQL = strSQL & ipTableName & ".DIV_DECL_UNPAID, "
+    strSQL = strSQL & ipTableName & ".DIV_AMT_RCVD, "
+    strSQL = strSQL & ipTableName & ".NONADMITTED_DECLARED_BUT_UNPAI, "
+    strSQL = strSQL & ipTableName & ".UNRLZD_VAL_INCREASE_DECREASE, "
+    strSQL = strSQL & ipTableName & ".CURR_YEARS_AMORTIZATION_ACCRET, "
+    strSQL = strSQL & ipTableName & ".CURR_YEARS_OTH_THAN_TEMPORARY, "
+    strSQL = strSQL & ipTableName & ".TOT_CHANGE_IN_BACV, "
+    strSQL = strSQL & ipTableName & ".TOT_FOREIGN_EXCHANGE_CHANGE_IN, "
+    strSQL = strSQL & ipTableName & ".NAIC_DESIGNATION, "
+    strSQL = strSQL & ipTableName & ".DTE_ACQRD "
+    If ipYear = 2012 Then
+        strSQL = strSQL & " , " & ipTableName & ".FAIR_VAL_HIERARCHY_LEVEL_AND_M & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2009 Or ipYear = 2010 Or ipYear = 2011 Then
+        strSQL = strSQL & " , " & ipTableName & ".METHOD_CODE_METHOD_USED_TO_OBT & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2008 Then
+        strSQL = strSQL & " , " & ipTableName & ".METHOD_USED_TO_OBTAIN_FAIR_VAL "
+    End If
+    
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE (((" & ipTableName & ".COCODE)=" & ipCoCode & ") AND ((" & ipTableName & ".LINE_NO) Not Like '*99999')) "
+    strSQL = strSQL & " ORDER BY " & ipTableName & ".COCODE, " & ipTableName & ".ORDR; "
+    SQLForScheduleD2S1Hist = strSQL
+End Function
+
+
+Function SQLForScheduleD2S2Hist(ipTableName As String, ipCoCode As Double, ipYear As Long) As String
+Dim strSQL As String
+'SELECT LCYSCDPT2SN2_V.COCODE, LCYSCDPT2SN2_V.LNCODE, LCYSCDPT2SN2_V.LINE_NO, LCYSCDPT2SN2_V.ORDR,
+'LCYSCDPT2SN2_V.LAST_UPDATE, LCYSCDPT2SN2_V.ACTIVE_ROW, LCYSCDPT2SN2_V.YEAR, LCYSCDPT2SN2_V.CUSIP_ISSUER,
+'LCYSCDPT2SN2_V.CUSIP_ISSUE, LCYSCDPT2SN2_V.CUSIP_CHECK_DIGIT, LCYSCDPT2SN2_V.DESCRIPTION, LCYSCDPT2SN2_V.CODE,
+'LCYSCDPT2SN2_V.FOREIGN,
+'LCYSCDPT2SN2_V.NO_OF_SHARES, LCYSCDPT2SN2_V.BOOKADJUST_CARRY_VAL, LCYSCDPT2SN2_V.RATE_PER_SHARE_USED_TO_OBTAIN,
+'LCYSCDPT2SN2_V.FAIR_VAL, LCYSCDPT2SN2_V.ACTUAL_COST, LCYSCDPT2SN2_V.DIV_DECL_UNPAID, LCYSCDPT2SN2_V.DIV_AMT_RCVD,
+'LCYSCDPT2SN2_V.NONADMITTED_DECLARED_BUT_UNPAI, LCYSCDPT2SN2_V.UNRLZD_VAL_INCREASE_DECREASE,
+'LCYSCDPT2SN2_V.CURR_YEARS_OTH_THAN_TEMPORARY, LCYSCDPT2SN2_V.TOT_CHANGE_IN_BACV, LCYSCDPT2SN2_V.TOT_FOREIGN_EXCHANGE_CHANGE_IN,
+'LCYSCDPT2SN2_V.NAIC_MKT_INDICATOR, LCYSCDPT2SN2_V.DTE_ACQRD, LCYSCDPT2SN2_V.METHOD_CODE_METHOD_USED_TO_OBT, LCYSCDPT2SN2_V.SOURCE_METHOD_USED_TO_OBTAIN_F
+'FROM LCYSCDPT2SN2_V
+'WHERE (((LCYSCDPT2SN2_V.COCODE)=60186) AND ((LCYSCDPT2SN2_V.LINE_NO) Not Like "*99999"));
+    strSQL = " SELECT " & ipTableName & ".YEAR, "
+    strSQL = strSQL & ipTableName & ".COCODE, "
+    strSQL = strSQL & ipTableName & ".LINE_NO, "
+    strSQL = strSQL & ipTableName & ".CUSIP_ISSUER & " & ipTableName & ".CUSIP_ISSUE & " & ipTableName & ".CUSIP_CHECK_DIGIT AS CUSIP, "
+    strSQL = strSQL & ipTableName & ".DESCRIPTION, "
+    strSQL = strSQL & ipTableName & ".CODE, "
+    strSQL = strSQL & ipTableName & ".FOREIGN, "
+    strSQL = strSQL & ipTableName & ".NO_OF_SHARES, "
+    strSQL = strSQL & ipTableName & ".BOOKADJUST_CARRY_VAL, "
+    strSQL = strSQL & ipTableName & ".RATE_PER_SHARE_USED_TO_OBTAIN, "
+    strSQL = strSQL & ipTableName & ".FAIR_VAL, "
+    strSQL = strSQL & ipTableName & ".ACTUAL_COST, "
+    strSQL = strSQL & ipTableName & ".DIV_DECL_UNPAID, "
+    strSQL = strSQL & ipTableName & ".DIV_AMT_RCVD, "
+    strSQL = strSQL & ipTableName & ".NONADMITTED_DECLARED_BUT_UNPAI, "
+    strSQL = strSQL & ipTableName & ".UNRLZD_VAL_INCREASE_DECREASE, "
+    strSQL = strSQL & ipTableName & ".CURR_YEARS_OTH_THAN_TEMPORARY, "
+    strSQL = strSQL & ipTableName & ".TOT_CHANGE_IN_BACV, "
+    strSQL = strSQL & ipTableName & ".TOT_FOREIGN_EXCHANGE_CHANGE_IN, "
+    strSQL = strSQL & ipTableName & ".NAIC_MKT_INDICATOR, "
+    strSQL = strSQL & ipTableName & ".DTE_ACQRD "
+    If ipYear = 2012 Then
+        strSQL = strSQL & " , " & ipTableName & ".FAIR_VAL_HIERARCHY_LEVEL_AND_M & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2009 Or ipYear = 2010 Or ipYear = 2011 Then
+        strSQL = strSQL & " , " & ipTableName & ".METHOD_CODE_METHOD_USED_TO_OBT & '-' & "
+        strSQL = strSQL & ipTableName & ".SOURCE_METHOD_USED_TO_OBTAIN_F AS METHOD_SOURCE " 'note that following fields are extra from more recent year(s)
+    ElseIf ipYear = 2008 Then
+        strSQL = strSQL & " , " & ipTableName & ".METHOD_USED_TO_OBTAIN_FAIR_VAL "
+    End If
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE (((" & ipTableName & ".COCODE)=" & ipCoCode & ") AND ((" & ipTableName & ".LINE_NO) Not Like '*99999')); "
+    SQLForScheduleD2S2Hist = strSQL
+End Function
+
+Function SQLForAssets(ipTableName As String, ipCoCode As Double, Optional ipSAFlag As Variant) As String
+Dim strSQL As String
+'note that there are no differences between insurer types for this schedule (at least in the column names
+    'SELECT FPYASSETS_V.COCODE, FPYASSETS_V.LNCODE, FPYASSETS_V.LINE_NO, FPYASSETS_V.ORDR, FPYASSETS_V.LAST_UPDATE,
+    'FPYASSETS_V.ACTIVE_ROW, FPYASSETS_V.YEAR, FPYASSETS_V.ASSTS_CURR_YR, FPYASSETS_V.NONADMITTED_ASSTS_CURR_YR,
+    'FPYASSETS_V.NET_ADMTD_ASSTS_CURR_YR, FPYASSETS_V.NET_ADMTD_ASSTS_PR_YR, FPYASSETS_V.INSIDE_AMT_1,
+    'FPYASSETS_V.INSIDE_AMT_2, FPYASSETS_V.INSIDE_AMT_3
+    'FROM FPYASSETS_V
+    'WHERE (((FPYASSETS_V.cocode) = 56014) And ((FPYASSETS_V.LINE_NO) <= "10"))
+    'ORDER BY FPYASSETS_V.ORDR;
+'note that certain fields were removed
+'    strSQL = " SELECT " & ipTableName & ".COCODE, " & ipTableName & ".LINE_NO, "
+    strSQL = " SELECT "
+    strSQL = strSQL & ipTableName & ".LINE_NO, "
+    If ipSAFlag Then
+        strSQL = strSQL & ipTableName & ".TOT_CURR_YR, "
+        strSQL = strSQL & ipTableName & ".TOT_PR_YR, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_1, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_2 "
+    Else
+        strSQL = strSQL & ipTableName & ".ASSTS_CURR_YR, "
+        strSQL = strSQL & ipTableName & ".NONADMITTED_ASSTS_CURR_YR, "
+        strSQL = strSQL & ipTableName & ".NET_ADMTD_ASSTS_CURR_YR, "
+        strSQL = strSQL & ipTableName & ".NET_ADMTD_ASSTS_PR_YR, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_1, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_2, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_3 "
+    End If
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE " & ipTableName & ".cocode = " & ipCoCode & " " '   And " & ipTableName & ".LINE_NO <= '10' "
+    strSQL = strSQL & " ORDER BY " & ipTableName & ".ORDR ; "
+    SQLForAssets = strSQL
+End Function
+
+Function SQLForLiabs(ipTableName As String, ipCoCode As Double, ipInsurerType As String, Optional ipSAFlag As Variant = 0) As String
+Dim strSQL As String
+'Dim NameLen As Byte
+'Dim TargetTable As String
+'NameLen = Len(ipTableName)
+'TargetTable = Mid(ipTableName, 2, NameLen - 1 - 2)
+'SELECT LCYLIAB_V.COCODE, LCYLIAB_V.LNCODE, LCYLIAB_V.LINE_NO, LCYLIAB_V.ORDR, LCYLIAB_V.LAST_UPDATE, LCYLIAB_V.ACTIVE_ROW, LCYLIAB_V.YEAR,
+'if health: LCYLIAB_V.COV_CURR_YR, LCYLIAB_V.UNCOVERED_CURR_YR, LCYLIAB_V.TOT_CURR_YR, LCYLIAB_V.TOT_PR_YR
+'LCYLIAB_V.CURRENT_YEAR, LCYLIAB_V.PRIOR_YEAR, LCYLIAB_V.INSIDE_AMT_1, LCYLIAB_V.INSIDE_AMT_2,
+'if health or fraternal or Life
+'
+'FROM LCYLIAB_V, PCYLIAB_V, PPYLIAB_V, FPYLIAB_V, FCYLIAB_V, TPYLIAB_V, TCYLIAB_V, XPYLIAB_V
+'WHERE (((LCYLIAB_V.cocode) = 60186))
+'ORDER BY LCYLIAB_V.ORDR;
+
+'    strSQL = " SELECT " & ipTableName & ".COCODE, " & ipTableName & ".LINE_NO, "
+    If ipSAFlag Then
+        strSQL = " SELECT " & ipTableName & ".LINE_NO, "
+        strSQL = strSQL & ipTableName & ".TOT_CURR_YR, "
+        strSQL = strSQL & ipTableName & ".TOT_PR_YR, "
+        strSQL = strSQL & ipTableName & ".INSIDE_AMT_1 "
+    Else
+       strSQL = " SELECT " & ipTableName & ".LINE_NO, "
+       If ipInsurerType = "X" Then
+           strSQL = strSQL & " " & ipTableName & ".COV_CURR_YR, " & ipTableName & ".UNCOVERED_CURR_YR, " & ipTableName & ".TOT_CURR_YR, " & ipTableName & ".TOT_PR_YR, "
+       Else
+           strSQL = strSQL & " " & ipTableName & ".CURRENT_YEAR, " & ipTableName & ".PRIOR_YEAR, "
+       End If
+    '   strSQL = strSQL & " " & ipTableName & ".CURRENT_YEAR, " & ipTableName & ".PRIOR_YEAR, " & ipTableName & ".INSIDE_AMT_1, "
+       strSQL = strSQL & ipTableName & ".INSIDE_AMT_1, "
+       If ipInsurerType = "P" Or ipInsurerType = "T" Then 'there are only 2 inside amounts for these 2 types
+           strSQL = strSQL & ipTableName & ".INSIDE_AMT_2 "
+       Else ' for health, life, and fraternal, there are three inside amounts!
+           strSQL = strSQL & ipTableName & ".INSIDE_AMT_2, " & ipTableName & ".INSIDE_AMT_3 "
+       End If
+    End If
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE " & ipTableName & ".cocode = " & ipCoCode & " "
+    strSQL = strSQL & " ORDER BY " & ipTableName & ".ORDR; "
+    SQLForLiabs = strSQL
+End Function
+
+Function SQLForGainsAndLosses(ipTableName As String, ipCoCode As Double) As String
+Dim strSQL As String
+Dim Year2Use As String
+If Right(Left(ipTableName, 3), 2) = "CY" Then
+    'For 2007 and after
+    'SELECT LCYEXCAPGLOSS_V.LNCODE, LCYEXCAPGLOSS_V.REAL_GN_LS_ON_SALES_OR_MATUR,
+    'LCYEXCAPGLOSS_V.OTH_REAL_ADJUSTMENTS, LCYEXCAPGLOSS_V.TOT_REAL_CAP_GN_LS,
+    'LCYEXCAPGLOSS_V.CHANGE_IN_UNRLZD_CAP_GN_LS, LCYEXCAPGLOSS_V.CHANGE_IN_UNRLZD_FOREIGN_EXCHA, LCYEXCAPGLOSS_V.COCODE
+    'FROM LCYEXCAPGLOSS_V
+    'WHERE (((LCYEXCAPGLOSS_V.cocode) = 60254));
+    strSQL = " SELECT " & ipTableName & ".LNCODE, " & ipTableName & ".REAL_GN_LS_ON_SALES_OR_MATUR, "
+    strSQL = strSQL & ipTableName & ".OTH_REAL_ADJUSTMENTS, " & ipTableName & ".TOT_REAL_CAP_GN_LS, "
+    strSQL = strSQL & ipTableName & ".CHANGE_IN_UNRLZD_CAP_GN_LS, " & ipTableName & ".CHANGE_IN_UNRLZD_FOREIGN_EXCHA "
+    strSQL = strSQL & " FROM " & ipTableName
+    strSQL = strSQL & " WHERE (((" & ipTableName & ".cocode) = " & ipCoCode & ")); "
+Else
+    Year2Use = Right(Left(ipTableName, 5), 4)
+    If Year2Use >= "2007" Then
+        strSQL = " SELECT " & ipTableName & ".LNCODE, " & ipTableName & ".REAL_GN_LS_ON_SALES_OR_MATUR, "
+        strSQL = strSQL & ipTableName & ".OTH_REAL_ADJUSTMENTS, " & ipTableName & ".TOT_REAL_CAP_GN_LS, "
+        strSQL = strSQL & ipTableName & ".CHANGE_IN_UNRLZD_CAP_GN_LS, " & ipTableName & ".CHANGE_IN_UNRLZD_FOREIGN_EXCHA "
+        strSQL = strSQL & " FROM " & ipTableName
+        strSQL = strSQL & " WHERE (((" & ipTableName & ".cocode) = " & ipCoCode & ")); "
+    Else
+    
+        'for 2005
+        'SELECT   L2005EXCAPGLOSS_V.LNCODE, L2005EXCAPGLOSS_V.REAL_GN_LS_ON_SALES_OR_MATUR,
+        'L2005EXCAPGLOSS_V.OTH_REAL_ADJUSTMENTS,
+        '                       L2005EXCAPGLOSS_V.INCREASES_DECREASES_BY_ADJ,
+        'L2005EXCAPGLOSS_V.TOT
+        'FROM L2005EXCAPGLOSS_V
+        'WHERE (((L2005EXCAPGLOSS_V.COCODE)=65749));
+        'For 2006
+        'SELECT  L2006EXCAPGLOSS_V.LNCODE, L2006EXCAPGLOSS_V.REAL_GN_LS_ON_SALES_OR_MATUR,
+        'L2006EXCAPGLOSS_V.OTH_REAL_ADJUSTMENTS,
+        '                        L2006EXCAPGLOSS_V.UNRLZD_INCREASES_DECREASES_ADJ,
+        'L2006EXCAPGLOSS_V.TOT
+        'FROM L2006EXCAPGLOSS_V
+        'WHERE (((L2006EXCAPGLOSS_V.COCODE)=69973));
+        strSQL = "  "
+        strSQL = strSQL & " SELECT " & ipTableName & ".LNCODE, " & ipTableName & ".REAL_GN_LS_ON_SALES_OR_MATUR, "
+        strSQL = strSQL & ipTableName & ".OTH_REAL_ADJUSTMENTS, "
+        If Year2Use = "2005" Then
+            strSQL = strSQL & ipTableName & ".INCREASES_DECREASES_BY_ADJ, "
+        Else
+            strSQL = strSQL & ipTableName & ".UNRLZD_INCREASES_DECREASES_ADJ, "
+        End If
+        strSQL = strSQL & ipTableName & ".TOT "
+        strSQL = strSQL & " FROM " & ipTableName
+        strSQL = strSQL & " WHERE (((" & ipTableName & ".COCODE)=" & ipCoCode & ")); "
+    End If
+End If
+SQLForGainsAndLosses = strSQL
+End Function
+
+Function SQLForInvestmentIncome(ipTableName As String, ipCoCode As Double) As String
+Dim strSQL As String
+
+'SELECT L2005EXNETINVT_V.COCODE, L2005EXNETINVT_V.LINE_NO, L2005EXNETINVT_V.CLTD_DUR_YR, L2005EXNETINVT_V.ERND_DUR_YR
+'FROM L2005EXNETINVT_V
+'WHERE (((L2005EXNETINVT_V.COCODE)=62324));
+strSQL = " SELECT " & ipTableName & ".LINE_NO, " & ipTableName & ".CLTD_DUR_YR, " & ipTableName & ".ERND_DUR_YR"
+strSQL = strSQL & "  FROM " & ipTableName
+strSQL = strSQL & " WHERE (((" & ipTableName & ".COCODE)=" & ipCoCode & ")); "
+SQLForInvestmentIncome = strSQL
+End Function
+
+' =====================================================================================
+'    This module - Utilities - contains a bunch of functions used by other modules 
+' =====================================================================================
+Option Compare Database
+Option Explicit
+'goal of this module is to provide subroutines and functions which can be used to create other procedures.
+'Need to know the column names in a given table?  What the label is for a given line number in a given table?
+'you should look here.
+
+Sub TestRun2()
+'written 11/13 by C Fahey
+Dim ThisDB As DAO.Database
+Dim MyTable As String
+Dim strSQL As String
+Dim DumpVal As String
+
+    Set ThisDB = CurrentDb
+'    MsgBox YrTxtToYrNum("PY")
+'    MyTable = "LCYSCDPT1_V"
+'    DumpVal = FnGetLineNosAndCodes(ThisDB, MyTable)
+'    MsgBox DumpVal
+'
+'    MyTable = "LCYASSETS_V"
+'    DumpVal = FnGetLineNosAndCodes(ThisDB, MyTable)
+'    MsgBox DumpVal
+    
+    'MyTable = "FCYEXREFUND_V"
+    'MyTable = "FCYEXTAXES_V"
+    'MyTable = "FCYGENEXP_V"
+    MyTable = "FCYEXPREM_V"
+    DumpVal = FnGetLineNosAndCodes(ThisDB, MyTable)
+    MsgBox DumpVal
+    DumpVal = GetRowDesc(ThisDB, MyTable, , False)
+    MsgBox DumpVal
+    DumpVal = ListColHeadings(ThisDB, MyTable, True)
+    MsgBox DumpVal
+
+    ThisDB.Close
+    
+MyExit:
+
+    Set ThisDB = Nothing
+End Sub
+
+Function FindSpace(ipTxt As String, Optional ipOffset As Integer = 1) As Integer
+Dim MyLen As Integer
+Dim i As Integer
+    MyLen = Len(ipTxt)
+    FindSpace = -1
+    If ipOffset >= MyLen Then GoTo MyExit
+    For i = ipOffset To MyLen
+        If Mid(ipTxt, i, 1) = " " Then Exit For
+    Next i
+    FindSpace = i
+MyExit:
+End Function
+
+Function MakeNickName(ipTxt As String) As String
+'written 3/21/13 by cfahey
+'this returns a partial on the insurance company name, preferably the first two words in company name
+' I think this was needed so that distinct, unique table names could be created for specific insurance companies
+Dim StartNextWord As Integer
+Dim NumOfSpaces As Integer
+    'count the spaces, and at the same time trim the leading and trailing spaces, if they exist
+    NumOfSpaces = CountSpaces(ipTxt, True, True)
+    If NumOfSpaces = -1 Then 'create a default nickname
+        MakeNickName = "InsureCo"
+        GoTo MyExit
+    ElseIf NumOfSpaces = 1 Then 'use entire field
+        MakeNickName = UCase(ipTxt)
+        GoTo MyExit
+    Else 'just use the first two words
+        StartNextWord = FindSpace(ipTxt) + 1
+        If NumOfSpaces > 2 And UCase(Mid(ipTxt, 1, StartNextWord - 1)) = "THE " Then 'skip the first word
+            ipTxt = Mid(ipTxt, StartNextWord)
+            StartNextWord = FindSpace(ipTxt) + 1
+            StartNextWord = FindSpace(ipTxt, StartNextWord)
+            MakeNickName = UCase(Mid(ipTxt, 1, StartNextWord - 1))
+        Else 'include the first word
+            StartNextWord = FindSpace(ipTxt, StartNextWord)
+            MakeNickName = UCase(Mid(ipTxt, 1, StartNextWord - 1))
+        End If
+    End If
+MyExit:
+End Function
+
+Function CountSpaces(ByRef ipTxt As String, Optional ipCountLeadingAndTrailingToo As Boolean = False, Optional ipChangeTxt As Boolean = False) As Integer
+Dim MyLen As Integer
+Dim i As Integer
+Dim CurCnt As Integer
+Dim CurTxt As String
+    CountSpaces = -1
+    CurTxt = ipTxt
+    MyLen = Len(CurTxt)
+    If ipCountLeadingAndTrailingToo = True Then
+        For i = 1 To MyLen
+            If Mid(CurTxt, i, 1) = " " Then CurCnt = CurCnt + 1
+        Next i
+        CountSpaces = CurCnt
+    Else
+        'First clear leading spaces
+        For i = 1 To MyLen
+            If Mid(CurTxt, i, 1) = " " Then
+                CurCnt = CurCnt + 1
+            Else
+                Exit For
+            End If
+        Next i
+        If CurCnt > 0 Then
+            CurTxt = Mid(CurTxt, CurCnt + 1, MyLen - CurCnt)
+            MyLen = Len(CurTxt)
+            CurCnt = 0
+        End If
+        For i = MyLen To 1 Step -1
+            If Mid(CurTxt, i, 1) = " " Then
+                CurCnt = CurCnt + 1
+            Else
+                Exit For
+            End If
+        Next i
+        If CurCnt > 0 Then
+            CurTxt = Mid(CurTxt, 1, MyLen - CurCnt)
+            MyLen = Len(CurTxt)
+            CurCnt = 0
+        End If
+        'now that we've trimmed leading and trailing spaces, let's just count the spaces!
+        For i = 1 To MyLen
+            If Mid(CurTxt, i, 1) = " " Then CurCnt = CurCnt + 1
+        Next i
+        If ipChangeTxt = True Then ipTxt = CurTxt
+        CountSpaces = CurCnt
+    End If
+MyExit:
+End Function
+
+Function TrimSpaces(ipTxt As String) As String
+Dim CharCnt As Long
+Dim WorkingTxt As String
+Dim i As Long
+    CharCnt = Len(ipTxt)
+    If CharCnt = 0 Or (CharCnt = 1 And ipTxt <> " ") Then
+        TrimSpaces = ipTxt
+    Else
+'    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            If Mid(ipTxt, i, 1) <> " " Then
+                Exit For ' non-space character found
+            End If
+        Next i
+        ipTxt = Mid(ipTxt, i, CharCnt - (i - 1))
+        CharCnt = Len(ipTxt)
+        For i = CharCnt To 1 Step -1
+            If Mid(ipTxt, i, 1) <> " " Then
+                Exit For
+            End If
+        Next i
+        TrimSpaces = Mid(ipTxt, 1, i)
+    End If
+    
+End Function
+
+Function RemoveBadChars(ipTxt As String, Optional ipRemoveSpaces As Boolean = True) As String
+'written 3/20/13 by cfahey
+'this function strips out all non-alphanumeric chars; originally meant to avoid bad column names
+Dim CharCnt As Long
+Dim CharVal As Integer
+Dim i As Long
+    CharCnt = Len(ipTxt)
+    If CharCnt > 1 Then
+        For i = 1 To CharCnt
+            CharVal = Asc(Mid(ipTxt, i, 1))
+            'MsgBox CharVal
+            If (CharVal > 47 And CharVal < 58) Or (CharVal > 64 And CharVal < 91) Or (CharVal > 96 And CharVal < 123) Then RemoveBadChars = RemoveBadChars & UCase(Mid(ipTxt, i, 1))
+        Next i
+    End If
+End Function
+
+Sub ListLineNosAndCodes(Optional ipTableName As String)
+'written 11/14/12 by cfahey
+'this subroutine
+Dim ThisDB As DAO.Database
+Dim MyRs As DAO.Recordset
+Dim MyTable As String
+Dim strFields As String
+Dim strSQL As String
+Dim i As Long
+Dim recCnt As Long
+Const LCode = "LNCODE"
+Const LNumber = "LINE_NO"
+
+    Set ThisDB = CurrentDb
+    If Len(ipTableName) = 0 Then
+        MyTable = ipTableName
+    Else
+        MyTable = "LCYSUMOPS_V"
+    End If
+    
+    strSQL = " SELECT DISTINCT " & LCode & ", " & LNumber & " FROM " & MyTable
+    strSQL = strSQL & " ORDER BY " & LNumber & " ; "
+    
+    Set MyRs = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    
+    MyRs.MoveLast
+    recCnt = MyRs.RecordCount
+    MyRs.MoveFirst
+    
+    If MyRs.RecordCount = 0 Then
+        MsgBox "No records matched!"
+        GoTo MyExit
+    Else
+        For i = 1 To recCnt
+            strFields = strFields & "'" & MyRs.Fields(LNumber) & "' ---> " & MyRs.Fields(LCode) & vbCrLf
+            MyRs.MoveNext
+        Next i
+    End If
+    MyRs.Close
+    ThisDB.Close
+    MsgBox strFields
+    
+    GoTo MyExit
+    
+MyExit:
+    Set ThisDB = Nothing
+    Set MyRs = Nothing
+End Sub
+
+Sub ConfirmDictionaryColName()
+'written 10/16/13 by cfahey
+'this confirms that the field names in the dictionary data are actually also columns in the table
+'this won't work in this access database, because the tables are missing.
+'Include here more as a VBA library function for illustration purposes.
+On Error GoTo ErrorHandler
+Dim ThisDB As DAO.Database
+Dim Dic1RS As DAO.Recordset
+Dim i As Integer
+Dim j As Integer
+Dim strSQL As String
+Dim ViewNm(8) As String
+Dim FldNms() As String
+Dim DicName1 As String
+Dim DicName2 As String
+Dim Reordered As Boolean
+Const Dict = "DICTIONARY"
+Const Col1 = "COLUMN_NAME"
+Const Col2 = "MNEMONIC"
+Const Table2Check = 8 '<< enter a number from 0 to 8
+    ViewNm(0) = "SECURITY_COMMON_V_1" 'ok, except for some identifiers
+    ViewNm(1) = "SECURITY_FREQUENT_TOPIC_V_1"
+    ViewNm(2) = "SECURITY_FREQUENT_TOPIC_V_2"
+    ViewNm(3) = "SECURITY_PERIODIC_TOPIC_V_1"
+    ViewNm(4) = "SECURITY_PERIODIC_TOPIC_V_2"
+    ViewNm(5) = "SECURITY_SELDOM_TOPIC_V_1"
+    ViewNm(6) = "SECURITY_SELDOM_TOPIC_V_2"
+    ViewNm(7) = "SECURITY_SELDOM_TOPIC_V_3"
+    ViewNm(8) = "SECURITY_SELDOM_TOPIC_V_4"
+
+    Set ThisDB = CurrentDb
+    'read names from the dictionary table for a given viewName
+    strSQL = "Select " & Col1 & ", " & Col2
+    strSQL = strSQL & " FROM " & Dict
+    strSQL = strSQL & " WHERE VIEW_NAME = '" & ViewNm(Table2Check) & "' "
+    strSQL = strSQL & " ORDER BY " & Col1 & ";"
+    Set Dic1RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+    
+    'read the field names into an array of strings
+    j = ThisDB.TableDefs(ViewNm(Table2Check)).Fields.Count
+    ReDim FldNms(j + 1)
+    For i = 0 To j - 1
+        FldNms(i + 1) = ThisDB.TableDefs(ViewNm(Table2Check)).Fields(i).name
+    Next i
+    
+    'now sort the field names alphabetically
+    Do
+        Reordered = False
+        For i = 1 To j - 1
+            If FldNms(i) > FldNms(i + 1) Then
+                FldNms(0) = FldNms(i)
+                FldNms(i) = FldNms(i + 1)
+                FldNms(i + 1) = FldNms(0)
+                Reordered = True
+            End If
+        Next i
+    Loop While Reordered = True
+    FldNms(0) = ""
+    Dic1RS.MoveFirst
+    i = 1
+    Do
+        DicName1 = Dic1RS.Fields(Col1).Value
+        DicName2 = Dic1RS.Fields(Col2).Value
+        
+        If DicName1 = FldNms(i) Or DicName2 = FldNms(i) Then 'move to next records
+            Dic1RS.MoveNext
+            DicName1 = Dic1RS.Fields(Col1).name
+            DicName2 = Dic1RS.Fields(Col2).name
+            i = i + 1
+        ElseIf DicName1 > FldNms(i) Then 'increment fldnms(i)
+            Debug.Print "Table Field " & FldNms(i) & " not found in dictionary."
+            i = i + 1
+        Else 'dicname1 < fldnms(i), so increment dicname1
+            Debug.Print "Dictionary Field " & DicName1 & "/" & DicName1 & " not found in table."
+            Dic1RS.MoveNext
+            DicName1 = Dic1RS.Fields(Col1).name
+            DicName2 = Dic1RS.Fields(Col2).name
+        End If
+    Loop While Dic1RS.EOF = False And i <= j
+    Dic1RS.Close
+    
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    'TestMe = -1
+    SysCmd acSysCmdSetStatus, "Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+    Set Dic1RS = Nothing
+    Set ThisDB = Nothing
+End Sub
+
+' =====================================================================================
+'    This CLASS module is used for timing of the various procedures 
+' =====================================================================================
+' Again, put this code in a VBA Class Module, and call the class module CHighResTimer  
+' Save this as class module CHighResTimer 
+Option Compare Database
+Option Explicit
+'the first few procs were taken from the Excel 2000 Programers Reference, by Wrox, and involves an API call
+'for more precise timing missions.  Normal resolution of a timer function is about 1 second.
+'how many times per secon is the counter updated?
+#If VBA7 Then
+    Private Declare PtrSafe Function QueryFrequency Lib "kernel32" Alias "QueryPerformanceFrequency" (lpFrequency As Currency) As Long
+    'what is teh counters value?
+    Private Declare PtrSafe Function QueryCounter Lib "kernel32" Alias "QueryPerformanceCounter" (lpPerformanceCount As Currency) As Long
+#Else
+    Private Declare Function QueryFrequency Lib "kernel32" Alias "QueryPerformanceFrequency" (lpFrequency As Currency) As Long
+    'what is teh counters value?
+    Private Declare Function QueryCounter Lib "kernel32" Alias "QueryPerformanceCounter" (lpPerformanceCount As Currency) As Long
+#End If
+'variables to store the counter information
+Dim cyFrequency As Currency
+Dim cyOverhead As Currency
+Dim cyStarted As Currency
+Dim cyStopped As Currency
+'the API Call itself takes some time to initialize.  For accurate timings, please consider this delay, found in the Initialize routine
+Private Sub Class_Initialize()
+    Dim cyCount1 As Currency, cyCount2 As Currency
+    'get the count freq
+    QueryFrequency cyFrequency
+    'call the high-res counter twice, to check how long it takes
+    QueryCounter cyCount1
+    QueryCounter cyCount2
+    'store the call overhead
+    cyOverhead = cyCount2 - cyCount1
+End Sub
+Public Sub StartTimer()
+'get the time that you started
+    QueryCounter cyStarted
+End Sub
+Public Sub StopTimer()
+'get the time that you stoped
+    QueryCounter cyStopped
+End Sub
+Public Property Get Elapsed() As Double
+Dim cyTimer As Currency
+    'have you stopped or not?
+    If cyStopped = 0 Then 'not stopped
+        QueryCounter cyTimer
+    Else
+        cyTimer = cyStopped
+    End If
+    'if you have a frequency, return the duration, in seconds
+    If cyFrequency > 0 Then
+        Elapsed = (cyTimer - cyStarted - cyOverhead) / cyFrequency
+    End If
+End Property
+
+'================================================================================================================
+' The functions below were tied to keystrokes, which is more convenient than the QuickBar. To use, 
+' I selected any number of cells with numbers in them. (The cells didn't even need to be 
+' contiguous).  This function provides statistics for the cells selected, and a window / message 
+' box pops up to display the %'age of assets, percentage of capital, and other ratios relevant to a credit 
+' analysis.  These were very relevant to my work in evaluating insurance companies. 
+'================================================================================================================
+Sub Statusbar_Simulation()
+On Error GoTo ErrorHandler
+'What remains to be done:
+'  Change lines from strings to string arrays, and just block-copy the text
+'  ideally, incorporate $000's when necessary, with corresponding decimals.
+'  better understand the msgbox tab function
+'
+' http://www.mvps.org/dmcritchie/statusbar.htm
+Dim str As String, strcnt As String, _
+    strx As String, strcnta As String
+Dim TotBACV As Currency
+Dim TotCap As Currency
+Dim BondBACV As Currency
+Dim MySum, MyAverage, MyMax, MyMin, MyMedian, MyMode As Currency
+Dim Line1, Line2, Line3, Line4, Line5, HeaderLine1, HeaderLine2, HeaderLine3 As String
+Dim TotCnt, NumericCnt, BlankCnt, AlphaCnt As String
+Dim RangesFound As Byte
+Dim i As Byte
+Dim N As Name
+Dim TmpStr As String
+Dim MyRng As Range
+
+    'there appear to be problems if only one cell is selected!
+    If Selection.Areas.Count = 1 And Selection.Cells.Count = 1 Then
+        Set MyRng = Selection
+        MySum = MyRng.Value
+        MyMax = MySum
+        MyAverage = MySum
+        MyMin = MySum
+        MyMedian = MySum
+    Else
+        MySum = Application.WorksheetFunction.Sum(Selection.SpecialCells(xlCellTypeVisible))
+        MyMax = Application.WorksheetFunction.Max(Selection.SpecialCells(xlCellTypeVisible))
+        MyAverage = Application.WorksheetFunction.Average(Selection.SpecialCells(xlCellTypeVisible))
+        MyMin = Application.WorksheetFunction.Min(Selection.SpecialCells(xlCellTypeVisible))
+        MyMedian = Application.WorksheetFunction.Median(Selection.SpecialCells(xlCellTypeVisible))
+    End If
+
+    TmpStr = WorksheetFunction.Text(MySum, "#,##0.0")
+    Line1 = "Sum" & vbTab & MyTrim(TmpStr, 22)
+    TmpStr = WorksheetFunction.Text(MyMax, "#,##0.0")
+    Line2 = "Max" & vbTab & MyTrim(TmpStr, 22)
+    TmpStr = WorksheetFunction.Text(MyAverage, "#,##0.00")
+    Line3 = "Avg" & vbTab & MyTrim(TmpStr, 22)
+    TmpStr = WorksheetFunction.Text(MyMin, "#,##0.0")
+    Line4 = "Min" & vbTab & MyTrim(TmpStr, 22)
+    TmpStr = WorksheetFunction.Text(MyMedian, "#,##0.0")
+    Line5 = "Median" & vbTab & MyTrim(TmpStr, 22)
+    
+    For Each N In ActiveWorkbook.Names
+        If UCase(N.Name) = "TBACV" Then RangesFound = RangesFound + 1
+        If UCase(N.Name) = "TOTCAP" Then RangesFound = RangesFound + 1
+        If UCase(N.Name) = "BBACV" Then RangesFound = RangesFound + 1
+    Next N
+    Set N = Nothing
+    If RangesFound = 3 Then 'prepare for presenting percentages in addition to range stats
+   
+        TotCap = Range("TotCap").Value * 1000
+        TotBACV = Range("Tbacv").Value * 1000
+        BondBACV = Range("BBacv").Value * 1000
+        'add proper spacing
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MySum, "#,##0.0")) > 5 Then Line1 = Line1 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMax, "#,##0.0")) > 5 Then Line2 = Line2 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyAverage, "#,##0.00")) > 5 Then Line3 = Line3 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMin, "#,##0.0")) > 5 Then Line4 = Line4 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMedian, "#,##0.0")) > 5 Then Line5 = Line5 & vbTab
+        
+        HeaderLine1 = "(Assumed $0's)" & vbTab & vbTab & vbTab & MyTrim(WorksheetFunction.Text(TotBACV, "#,##0"), 20) & vbTab & MyTrim(WorksheetFunction.Text(TotCap, "#,##0"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(BondBACV, "#,##0"), 20) & Chr(10)
+        HeaderLine2 = MyTrim(" ", 20) & vbTab & vbTab & vbTab & MyTrim("Total BACV", 20) & vbTab & vbTab & MyTrim("Total Cap", 20) & vbTab & vbTab & MyTrim("Bond BACV", 20) & Chr(10)
+        HeaderLine3 = vbTab & MyTrim("Amount", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & Chr(10)
+        
+        Line1 = Line1 & vbTab & MyTrim(WorksheetFunction.Text(MySum / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MySum / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MySum / BondBACV, "#,##0.0%"), 20)
+        Line2 = Line2 & vbTab & MyTrim(WorksheetFunction.Text(MyMax / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMax / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMax / BondBACV, "#,##0.0%"), 20)
+        Line3 = Line3 & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / BondBACV, "#,##0.0%"), 20)
+        Line4 = Line4 & vbTab & MyTrim(WorksheetFunction.Text(MyMin / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / BondBACV, "#,##0.0%"), 20)
+        Line5 = Line5 & vbTab & MyTrim(WorksheetFunction.Text(MyMedian / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMedian / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / BondBACV, "#,##0.0%"), 20)
+        
+    Else
+        HeaderLine1 = " "
+        HeaderLine2 = " "
+        HeaderLine3 = " " & Chr(10)
+    End If
+         MsgBox "Numeric Cells:" & vbTab & MyTrim(WorksheetFunction.Text(NumericCnt, "0"), 10) & Chr(10) & _
+                "Alpha Cells:" & vbTab & MyTrim(WorksheetFunction.Text(AlphaCnt, "0"), 10) & Chr(10) & _
+                "Blank Cells:" & vbTab & MyTrim(WorksheetFunction.Text(BlankCnt, "0"), 10) & Chr(10) & _
+                "Total Cells Defined: " & MyTrim(WorksheetFunction.Text(TotCnt, "0"), 10) & Chr(10) & Chr(10) & _
+                HeaderLine1 & _
+                HeaderLine2 & _
+                HeaderLine3 & _
+                Line1 & Chr(10) & Chr(10) & _
+                Line2 & Chr(10) & _
+                Line3 & Chr(10) & _
+                Line4 & Chr(10) & Chr(10) & _
+                Line5 & Chr(10)
+
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error In Calculation!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error! " & "Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+
+Ender:
+
+MyExit:
+    Set MyRng = Nothing
+End Sub
+
+Sub Stat_Sim2()
+On Error GoTo ErrorHandler
+    'Idea: Same as statusbar_simulation, but assumes numbers are in units of 000's
+    'What remains to be done:
+    '  Change lines from strings to string arrays, and just block-copy the text
+    '  ideally, incorporate $000's when necessary, with corresponding decimals.
+    '  better understand the msgbox tab function
+    '
+    ' http://www.mvps.org/dmcritchie/statusbar.htm
+    Dim str As String, strcnt As String, _
+        strx As String, strcnta As String
+    Dim TotBACV As Currency
+    Dim TotCap As Currency
+    Dim BondBACV As Currency
+    Dim MySum, MyAverage, MyMax, MyMin, MyMedian, MyMode As Currency
+    Dim Line1, Line2, Line3, Line4, Line5, line6, HeaderLine1, HeaderLine2, HeaderLine3 As String
+    Dim TotCnt, NumericCnt, BlankCnt, AlphaCnt As String
+    Dim RangesFound As Byte
+    Dim N As Name
+    Dim MyRng As Range
+    'there appear to be problems if only one cell is selected!
+    If Selection.Areas.Count = 1 And Selection.Cells.Count = 1 Then
+        Set MyRng = Selection
+        MySum = MyRng.Value
+        MyMax = MySum
+        MyAverage = MySum
+        MyMin = MySum
+        MyMedian = MySum
+    Else
+        MySum = Application.Sum(Selection.SpecialCells(xlCellTypeVisible))
+        MyMax = Application.Max(Selection.SpecialCells(xlCellTypeVisible))
+        MyAverage = Application.Average(Selection.SpecialCells(xlCellTypeVisible))
+        MyMin = Application.Min(Selection.SpecialCells(xlCellTypeVisible))
+        MyMedian = Application.Median(Selection.SpecialCells(xlCellTypeVisible))
+        'MyMode = Application.Mode(Selection.SpecialCells(xlCellTypeVisible))
+    End If
+    '***************************************************
+    'AREA UNDER CONSTRUCTION
+    '    This does not seem to work. If two ranges are specified, the blanks count returns an error, preventing MSGBOX from displaying
+    '    I must either be able to contain the possible Blanks error (which affects all other counts), or figure out how to cycle
+    '     through the specialcells range individually to perform count(s) manually.
+	'    NumericCnt = Application.Count(Selection.SpecialCells(xlCellTypeVisible))
+	'    BlankCnt = Application.CountBlank(Selection.SpecialCells(xlCellTypeVisible))
+	'    TotCnt = BlankCnt + Application.CountA(Selection.SpecialCells(xlCellTypeVisible))
+	'    AlphaCnt = TotCnt - BlankCnt - NumericCnt
+    
+    Line1 = "Sum" & vbTab & MyTrim(WorksheetFunction.Text(MySum, "#,##0.0"), 22)
+    Line2 = "Max" & vbTab & MyTrim(WorksheetFunction.Text(MyMax, "#,##0.0"), 22)
+    Line3 = "Avg" & vbTab & MyTrim(WorksheetFunction.Text(MyAverage, "#,##0.00"), 22)
+    Line4 = "Min" & vbTab & MyTrim(WorksheetFunction.Text(MyMin, "#,##0.0"), 22)
+    Line5 = "Median" & vbTab & MyTrim(WorksheetFunction.Text(MyMedian, "#,##0.0"), 22)
+    'line6 = "Mode" & vbTab & MyTrim(WorksheetFunction.Text(MyMode, "#,##0.0"), 22)
+    
+    For Each N In ActiveWorkbook.Names
+        If N.Name = "TBACV" Then RangesFound = RangesFound + 1
+        If N.Name = "TotCap" Then RangesFound = RangesFound + 1
+        If N.Name = "BBACV" Then RangesFound = RangesFound + 1
+    Next N
+    Set N = Nothing
+    If RangesFound = 3 Then 'prepare for presenting percentages in addition to range stats
+   
+        TotCap = Range("TotCap").Value
+        TotBACV = Range("TBACV").Value
+        BondBACV = Range("BBACV").Value
+        'add proper spacing
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MySum, "#,##0.0")) > 5 Then Line1 = Line1 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMax, "#,##0.0")) > 5 Then Line2 = Line2 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyAverage, "#,##0.00")) > 5 Then Line3 = Line3 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMin, "#,##0.0")) > 5 Then Line4 = Line4 & vbTab
+        If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMedian, "#,##0.0")) > 5 Then Line5 = Line5 & vbTab
+        'If Len(WorksheetFunction.Text(TotBACV, "#,##0")) - Len(WorksheetFunction.Text(MyMode, "#,##0.0")) > 5 Then line6 = line6 & vbTab
+        
+        HeaderLine1 = "(Assumed $0's)" & vbTab & vbTab & vbTab & MyTrim(WorksheetFunction.Text(TotBACV, "#,##0"), 20) & vbTab & MyTrim(WorksheetFunction.Text(TotCap, "#,##0"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(BondBACV, "#,##0"), 20) & Chr(10)
+        HeaderLine2 = MyTrim(" ", 20) & vbTab & vbTab & vbTab & MyTrim("Total BACV", 20) & vbTab & vbTab & MyTrim("Total Cap", 20) & vbTab & vbTab & MyTrim("Bond BACV", 20) & Chr(10)
+        HeaderLine3 = vbTab & MyTrim("Amount", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & vbTab & vbTab & MyTrim("Percentage", 20) & Chr(10)
+        
+        Line1 = Line1 & vbTab & MyTrim(WorksheetFunction.Text(MySum / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MySum / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MySum / BondBACV, "#,##0.0%"), 20)
+        Line2 = Line2 & vbTab & MyTrim(WorksheetFunction.Text(MyMax / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMax / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMax / BondBACV, "#,##0.0%"), 20)
+        Line3 = Line3 & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyAverage / BondBACV, "#,##0.0%"), 20)
+        Line4 = Line4 & vbTab & MyTrim(WorksheetFunction.Text(MyMin / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / BondBACV, "#,##0.0%"), 20)
+        Line5 = Line5 & vbTab & MyTrim(WorksheetFunction.Text(MyMedian / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMedian / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / BondBACV, "#,##0.0%"), 20)
+        'line6 = line6 & vbTab & MyTrim(WorksheetFunction.Text(MyMode / TotBACV, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMode / TotCap, "#,##0.0%"), 20) & vbTab & vbTab & MyTrim(WorksheetFunction.Text(MyMin / BondBACV, "#,##0.0%"), 20)
+        
+    Else
+        HeaderLine1 = " "
+        HeaderLine2 = " "
+        HeaderLine3 = " " & Chr(10)
+    End If
+         MsgBox "Numeric Cells:" & vbTab & MyTrim(WorksheetFunction.Text(NumericCnt, "0"), 10) & Chr(10) & _
+                "Alpha Cells:" & vbTab & MyTrim(WorksheetFunction.Text(AlphaCnt, "0"), 10) & Chr(10) & _
+                "Blank Cells:" & vbTab & MyTrim(WorksheetFunction.Text(BlankCnt, "0"), 10) & Chr(10) & _
+                "Total Cells Defined: " & MyTrim(WorksheetFunction.Text(TotCnt, "0"), 10) & Chr(10) & Chr(10) & _
+                HeaderLine1 & _
+                HeaderLine2 & _
+                HeaderLine3 & _
+                Line1 & Chr(10) & Chr(10) & _
+                Line2 & Chr(10) & _
+                Line3 & Chr(10) & _
+                Line4 & Chr(10) & Chr(10) & _
+                Line5 & Chr(10) '& _
+                'line6
+Ender:
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error In Calculation!" & vbCrLf & vbCrLf & "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Application.StatusBar = "Error! " & "Error #" & Err.Number & ", " & Err.Description
+    Err.Clear
+MyExit:
+    Set MyRng = Nothing
+
+End Sub
+
+
+
+

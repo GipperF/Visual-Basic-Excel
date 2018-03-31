@@ -1,0 +1,923 @@
+' This code downloads summary data from the NAIC database into an Excel file.  
+' At that point, the macro within the Excel file is run to tabulate all the data properly.
+' This code was found in the Access module HistInsurerInfo and dumps the 
+' data into the Excel file G:\Data\ChrisFahey\HistInsurerInfo.xlsm. 
+' Of course, that directory and possibly file name may be changed.
+
+' An empty table (HistInsurerInfo.xlsm) as well as completed download
+' (HistInsurerInfo-2013-10-8.xlsm) are provided with this code
+
+Option Compare Database
+Option Explicit
+'*****************************************
+' CY    2012
+' PY    2011
+' PY1   2010
+' PY2   2009
+' PY3   2008
+' PY4   2007
+' PY5   2006
+' PY6   2005
+' PY7   2004
+' PY8   2003
+' PY9   2002
+
+Sub UpdateAnyYEInsurerInfo()
+On Error GoTo ErrorHandler
+'Developed 9/18/12 by cfahey
+'updated 9/15/13 by cfahey to dump cash and Cash Eq
+'identified as relevant on 12/6/12 by cfahey
+'Results were checked as correct on 12/6/12 by cfahey
+'this gathers data from a Company, Asset, and Liability tables for the year(s) you specify and
+' plops the crap/vital information into Excel spreadsheets for compilation by an Excel Macro
+'it also does some preliminary error checking
+Dim ThisDB As DAO.Database
+Dim RS As DAO.Recordset
+Dim XLApp As Excel.Application
+Dim XLWkBk As Excel.Workbook
+Dim XLWkSht As Excel.Worksheet
+Dim xlSourceWksht As Excel.Worksheet
+Dim xlCopiedWksht As Excel.Worksheet
+Dim MyCopyFrom As Excel.Range
+Dim n As Object
+Dim H As Byte
+Dim i As Byte
+Dim j As Long
+Dim K As Integer
+Dim Count(5) As Integer
+Dim Industry(5) As String
+Dim AssetLines(5) As String
+Dim LiabLines(5) As String
+Dim AssetWhere As String
+Dim LiabWhere As String
+Dim QueryName As String
+Dim HistPeriod(9) As String
+Dim strSQL As String
+Dim MaxRow As Long
+Dim TmpName As String
+Dim TmpName2 As String
+Dim TmpSheetName As String
+Dim AssetTable As String
+Dim LiabTable As String
+Dim MyTime As Double
+Dim obTimer As New CHighResTimer
+Dim CurDumpSpot As String
+'Dim CashEQDumpCol As String
+'Dim CashDumpCol As String
+Dim CurRecOffset As Long
+Dim NewTargetFileName As String
+
+Const AssetDumpCol = "B" 'can't be "A" because you need space for the INDUSTRY column
+Const DADumpCol = "Z"
+Const CDumpCol = "AZ"
+Const CEDumpCol = "BZ"
+Const LiabDumpCol = "J"
+Const FirstDataRow = 2
+Const DefaultDumpSpot = "A2"
+Const DEFAULTDUMPSPOT2 = "Z2"
+Const CoTbl = "COMPANY"
+Const GrpTbl = "GROUP_CODE"
+Const AssetsTbl = "ASSETS_V"
+Const LiabsTbl = "LIAB_V"
+Const EXEC_DUMP_RECS = 1
+Const DEBUGON = 1
+Const cFirstHistPeriod = 8 'should start with 0
+Const cLastHistPeriod = 9 'no higher than the greatest index for the histperiod array
+'Const MAXHISTPERIODS = 8 'Count starts at 0, so 1 is actually 2 years. Max can be 8
+Const MaxIndustries = 4 'there are 5 industries (L,P,X,T,F), but with base 0, we range from 1 to 4
+Const TARGETXLFILE = "G:\Data\ChrisFahey\HistInsurerInfo.xlsm" 'this file is a template file
+
+'Const TARGETXLFILE = "C:\Data\2013\zReports\HistInsurerInfo.xlsm" 'this file is a template file
+'Const TARGETXLFILE = "C:\CMData\2013\zRefData\EnlightenedHistInsurerInfo.xlsm" '
+'Const SETRECLIMIT = 1
+
+''Dim IndColCnt(5) As Byte
+'Dim AssetSheet As String
+    'Name of the file is the time stamp of when the file was created
+    If UCase(Right(TARGETXLFILE, 1)) = "M" Then
+        NewTargetFileName = Mid(TARGETXLFILE, 1, Len(TARGETXLFILE) - 5) & "-" & Year(Now()) & "-" & Month(Now()) & "-" & Day(Now()) & ".xlsm"
+    ElseIf UCase(Right(TARGETXLFILE, 1)) = "S" Then
+        NewTargetFileName = Mid(TARGETXLFILE, 1, Len(TARGETXLFILE) - 4) & "-" & Year(Now()) & "-" & Month(Now()) & "-" & Day(Now()) & ".xlsm"
+    Else
+        MsgBox "Uncertain Target XL File Name.  Please check code, then restart!"
+        GoTo MyExit
+    End If
+
+    HistPeriod(0) = "CY" '2012
+    HistPeriod(1) = "PY"
+    HistPeriod(2) = "PY1"
+    HistPeriod(3) = "PY2"
+    HistPeriod(4) = "PY3"
+    HistPeriod(5) = "PY4"
+    HistPeriod(6) = "PY5"
+    HistPeriod(7) = "PY6" '2005
+    HistPeriod(8) = "PY7" '2004
+    HistPeriod(9) = "PY8" '2003
+
+    Industry(0) = "L"
+    Industry(1) = "P"
+    Industry(2) = "X"
+    Industry(3) = "T"
+    Industry(4) = "F"
+
+    Set ThisDB = CurrentDb
+    obTimer.StartTimer
+
+    'next, open the excel file
+    Set XLApp = New Excel.Application
+    If DEBUGON Then
+        XLApp.Visible = True
+        XLApp.ScreenUpdating = True
+        XLApp.AskToUpdateLinks = False
+    Else
+        XLApp.Visible = False
+        XLApp.ScreenUpdating = False
+        XLApp.AskToUpdateLinks = False
+    End If
+    If Len(Dir$(TARGETXLFILE)) > 0 Then ' the file exists, so we should open it up!
+        Set XLWkBk = XLApp.Workbooks.Open(TARGETXLFILE)
+    Else
+        MsgBox "TARGET file " & TARGETXLFILE & " not found.  Please confirm existence, then restart!"
+        GoTo MyExit
+    End If
+
+    For H = cFirstHistPeriod To cLastHistPeriod 'MAXHISTPERIODS ' used to be 8
+        'do the queries currently exist? If so, delete, so we can in turn create correct queries
+        For i = 0 To MaxIndustries ' note change here - only life!!!  (used to be 4)
+            SysCmd acSysCmdSetStatus, "Creating Asset Query for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+
+            ' *****************  ASSETS QUERY CREATION  **************************
+            QueryName = Industry(i) & HistPeriod(H) & "PreAssets"
+            K = DropDAOQuery(ThisDB, QueryName)
+            If K < 0 Then GoTo MyExit
+
+            'create the sql to form the Pre-Asset table
+            AssetTable = Industry(i) & HistPeriod(H) & AssetsTbl
+            If TableIsInThisDB(ThisDB, AssetTable) = 0 Then
+                MsgBox "Table " & AssetTable & " not found in this database. You likely need to create a link.  Please fix, then restart!"
+                GoTo MyExit
+            End If
+
+            AssetWhere = " WHERE ( " & CoTbl & ".COCODE > 9999  AND (" & AssetTable & ".LNCODE <= 113 ) ) " '& " Or " & AssetTable & ".LNCODE In (140,141) ) ) " 'removing the 140, 141 removes securities lending and derivatives entries, making comparisons across years easier
+
+            strSQL = " SELECT "
+            strSQL = strSQL & CoTbl & ".COCODE, "
+            strSQL = strSQL & CoTbl & ".STATE_OF_DOMICILE, "
+            strSQL = strSQL & CoTbl & ".SHORT_COMPANY_NAME, "
+            strSQL = strSQL & CoTbl & ".GROUP_CODE_ID, "
+
+            strSQL = strSQL & GrpTbl & ".GROUP_NAME, "
+
+            strSQL = strSQL & AssetTable & ".YEAR, "
+            strSQL = strSQL & AssetTable & ".ORDR, "
+            strSQL = strSQL & AssetTable & ".LINE_NO,  "
+            strSQL = strSQL & AssetTable & ".LNCODE,  "
+            strSQL = strSQL & AssetTable & ".NET_ADMTD_ASSTS_CURR_YR "
+            strSQL = strSQL & " FROM ( " & CoTbl & " "
+            strSQL = strSQL & " LEFT JOIN GROUP_CODE "
+            strSQL = strSQL & " ON " & CoTbl & ".GROUP_CODE_ID = " & GrpTbl & ".GROUP_CODE_ID ) "
+            strSQL = strSQL & " INNER JOIN " & AssetTable & " ON " & CoTbl & ".COCODE = " & AssetTable & ".COCODE " ' FCYASSETS_V ON COMPANY.COCODE = FCYASSETS_V.COCODE "
+            strSQL = strSQL & AssetWhere
+            strSQL = strSQL & " ORDER BY " & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".ORDR  "
+            strSQL = strSQL & " ; "
+
+            'create the query
+            Set n = ThisDB.CreateQueryDef(QueryName, strSQL)
+            SysCmd acSysCmdSetStatus, "Asset Qry " & QueryName & " created. SQL: " & strSQL
+
+            ' *****************   SHORT-TERM INVESTMENTS QUERY CREATION  **************************
+            'now make the PreAssets2 for the DA assets
+            SysCmd acSysCmdSetStatus, "Creating SHORT-TERM INVESTMENTS Query for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+            
+            QueryName = Industry(i) & HistPeriod(H) & "PreAssets2"
+            K = DropDAOQuery(ThisDB, QueryName)
+            If K < 0 Then GoTo MyExit
+
+            'create the sql to form the Pre-Assets2 table
+            'AssetTable = Industry(i) & HistPeriod(H) & AssetsTbl ' <<< ALREADY DEFINED ABOVE!!!
+            Select Case i
+                Case 0
+                    AssetWhere = " WHERE ( " & CoTbl & ".COCODE > 9999  AND " & AssetTable & ".LNCODE In (100,108) ) "
+                Case 1, 2, 3, 4
+                    AssetWhere = " WHERE ( " & AssetTable & ".LNCODE  In (100,108) ) "
+            End Select
+
+            strSQL = " SELECT "
+            strSQL = strSQL & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".YEAR, "
+            strSQL = strSQL & CoTbl & ".STATE_OF_DOMICILE, "
+            strSQL = strSQL & CoTbl & ".SHORT_COMPANY_NAME, "
+            strSQL = strSQL & CoTbl & ".GROUP_CODE_ID, "
+
+            strSQL = strSQL & GrpTbl & ".GROUP_NAME, "
+
+            strSQL = strSQL & AssetTable & ".LNCODE, "
+            strSQL = strSQL & AssetTable & ".LINE_NO, "
+            strSQL = strSQL & AssetTable & ".ORDR, "
+            If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then
+                strSQL = strSQL & AssetTable & ".INSIDE_AMT_2 " 'this is the summary amount of short term investments (DA)
+            Else
+                strSQL = strSQL & AssetTable & ".INSIDE_AMT_3 " 'this is the summary amount of short term investments (DA)
+            End If
+            strSQL = strSQL & " FROM ( " & CoTbl & " "
+            strSQL = strSQL & " LEFT JOIN GROUP_CODE "
+            strSQL = strSQL & " ON " & CoTbl & ".GROUP_CODE_ID = " & GrpTbl & ".GROUP_CODE_ID ) "
+            strSQL = strSQL & " INNER JOIN " & AssetTable & " ON " & CoTbl & ".COCODE = " & AssetTable & ".COCODE "
+            strSQL = strSQL & AssetWhere
+            strSQL = strSQL & " ORDER BY " & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".ORDR ; "
+
+            'create the query
+            Set n = ThisDB.CreateQueryDef(QueryName, strSQL)
+            SysCmd acSysCmdSetStatus, "Shrt Trm Qry " & QueryName & " created. SQL: " & strSQL
+            ' **************************************************************************
+            ' Modified 9/15/13 by CFahey
+            ' We need to get CASH, so let's do the same query, just changing column added
+            SysCmd acSysCmdSetStatus, "Creating CASH Query for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+
+            QueryName = Industry(i) & HistPeriod(H) & "PreAssets3"
+            K = DropDAOQuery(ThisDB, QueryName)
+            If K < 0 Then GoTo MyExit
+
+            'create the sql to form the Pre-Assets2 table
+            'AssetTable = Industry(i) & HistPeriod(H) & AssetsTbl ' <<< ALREADY DEFINED ABOVE!!!
+            Select Case i
+                Case 0
+                    AssetWhere = " WHERE ( " & CoTbl & ".COCODE > 9999  AND " & AssetTable & ".LNCODE In (100,108) ) "
+                Case 1, 2, 3, 4
+                    AssetWhere = " WHERE ( " & AssetTable & ".LNCODE  In (100,108) ) "
+            End Select
+
+            strSQL = " SELECT "
+            strSQL = strSQL & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".YEAR, "
+            strSQL = strSQL & CoTbl & ".STATE_OF_DOMICILE, "
+            strSQL = strSQL & CoTbl & ".SHORT_COMPANY_NAME, "
+            strSQL = strSQL & CoTbl & ".GROUP_CODE_ID, "
+
+            strSQL = strSQL & GrpTbl & ".GROUP_NAME, "
+
+            strSQL = strSQL & AssetTable & ".LNCODE, "
+            strSQL = strSQL & AssetTable & ".LINE_NO, "
+            strSQL = strSQL & AssetTable & ".ORDR, "
+'            If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then
+                strSQL = strSQL & AssetTable & ".INSIDE_AMT_1 " 'this is the summary amount of short term investments (DA)
+'            Else
+'                strSQL = strSQL & AssetTable & ".INSIDE_AMT_3 " 'this is the summary amount of short term investments (DA)
+'            End If
+            strSQL = strSQL & " FROM ( " & CoTbl & " "
+            strSQL = strSQL & " LEFT JOIN GROUP_CODE "
+            strSQL = strSQL & " ON " & CoTbl & ".GROUP_CODE_ID = " & GrpTbl & ".GROUP_CODE_ID ) "
+            strSQL = strSQL & " INNER JOIN " & AssetTable & " ON " & CoTbl & ".COCODE = " & AssetTable & ".COCODE "
+            strSQL = strSQL & AssetWhere
+            strSQL = strSQL & " ORDER BY " & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".ORDR ; "
+
+            'create the query
+            Set n = ThisDB.CreateQueryDef(QueryName, strSQL)
+            SysCmd acSysCmdSetStatus, "Shrt Trm Qry " & QueryName & " created. SQL: " & strSQL
+            ' ################################################################################
+            ' Modified 9/15/13 by CFahey
+            ' We need to get CASH EQUIVALENTS, so let's do the same query, just chaning column added
+            SysCmd acSysCmdSetStatus, "Creating CASH EQUIVALENT Query for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+            
+            QueryName = Industry(i) & HistPeriod(H) & "PreAssets4"
+            K = DropDAOQuery(ThisDB, QueryName)
+            If K < 0 Then GoTo MyExit
+
+            'create the sql to form the Pre-Assets2 table
+            'AssetTable = Industry(i) & HistPeriod(H) & AssetsTbl ' <<< ALREADY DEFINED ABOVE!!!
+            Select Case i
+                Case 0
+                    AssetWhere = " WHERE ( " & CoTbl & ".COCODE > 9999  AND " & AssetTable & ".LNCODE In (100,108) ) "
+                Case 1, 2, 3, 4
+                    AssetWhere = " WHERE ( " & AssetTable & ".LNCODE  In (100,108) ) "
+            End Select
+
+            strSQL = " SELECT "
+            strSQL = strSQL & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".YEAR, "
+            strSQL = strSQL & CoTbl & ".STATE_OF_DOMICILE, "
+            strSQL = strSQL & CoTbl & ".SHORT_COMPANY_NAME, "
+            strSQL = strSQL & CoTbl & ".GROUP_CODE_ID, "
+
+            strSQL = strSQL & GrpTbl & ".GROUP_NAME, "
+
+            strSQL = strSQL & AssetTable & ".LNCODE, "
+            strSQL = strSQL & AssetTable & ".LINE_NO, "
+            strSQL = strSQL & AssetTable & ".ORDR, "
+'            If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then
+'                strSQL = strSQL & AssetTable & ".INSIDE_AMT_2 " 'this is the summary amount of short term investments (DA)
+'            Else
+                strSQL = strSQL & AssetTable & ".INSIDE_AMT_2 " 'this is the summary amount of short term investments (DA)
+'            End If
+            strSQL = strSQL & " FROM ( " & CoTbl & " "
+            strSQL = strSQL & " LEFT JOIN GROUP_CODE "
+            strSQL = strSQL & " ON " & CoTbl & ".GROUP_CODE_ID = " & GrpTbl & ".GROUP_CODE_ID ) "
+            strSQL = strSQL & " INNER JOIN " & AssetTable & " ON " & CoTbl & ".COCODE = " & AssetTable & ".COCODE "
+            strSQL = strSQL & AssetWhere
+            strSQL = strSQL & " ORDER BY " & CoTbl & ".COCODE, "
+            strSQL = strSQL & AssetTable & ".ORDR ; "
+
+            'create the query
+            Set n = ThisDB.CreateQueryDef(QueryName, strSQL)
+            SysCmd acSysCmdSetStatus, "Shrt Trm Qry " & QueryName & " created. SQL: " & strSQL
+            ' **************************************************************************
+            ' 9/24/13 - Must join to the company table to ensure that no dropped companies are included, assuring consistent counts b/t assets and liab.
+            'now create the PreLiab Queries
+            QueryName = Industry(i) & HistPeriod(H) & "PreLiab"
+            K = DropDAOQuery(ThisDB, QueryName)
+            If K < 0 Then GoTo MyExit
+
+            ' *****************   LIABILITIES QUERY CREATION  **************************
+            'create the sql to form the Pre-Liab table.  Possible fields are Borrowings, Surplus, AVR, Capital Notes, and Surplus Notes
+            SysCmd acSysCmdSetStatus, "Creating Liability Query for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+
+            LiabTable = Industry(i) & HistPeriod(H) & LiabsTbl
+            If TableIsInThisDB(ThisDB, LiabTable) = 0 Then
+                MsgBox "Table " & LiabTable & " not found in this database. You likely need to create a link.  Please fix, then restart!"
+                GoTo MyExit
+            End If
+
+            Select Case i
+                Case 0 'L
+                    LiabWhere = " WHERE " & LiabTable & ".COCODE > 9999 AND " & LiabTable & ".LNCODE In (66,64,54,69,33) " '33-borrowings, 54=Surplus, 66-Surpl Nts, 69-Cap'l Nts, 64-AVR
+                Case 1 'P
+                    LiabWhere = " WHERE " & LiabTable & ".COCODE > 9999 AND " & LiabTable & ".LNCODE In (46,48,31,7) " '    46-33-Surplus Notes, 48-24-Cap'l Notes, 31-37-Srpls as regds Policyholders, 7-8-Borrowings
+                Case 2 'X
+                    LiabWhere = " WHERE " & LiabTable & ".COCODE > 9999 AND " & LiabTable & ".LNCODE IN (27,22,10) " '      27-33-Tot Cap/Surplus, 22-29-Surplus Notes, 10-14-Borrowings
+                Case 3 'T
+                    LiabWhere = " WHERE " & LiabTable & ".COCODE > 9999 AND " & LiabTable & ".LNCODE IN (45,23,10) "
+                Case 4 'F
+                    LiabWhere = " WHERE " & LiabTable & ".COCODE > 9999 AND " & LiabTable & ".LNCODE IN (29,38,49,28) "
+            End Select
+            
+            'SELECT PCYLIAB_V.COCODE, PCYLIAB_V.Year, PCYLIAB_V.LNCODE, PCYLIAB_V.LINE_NO, PCYLIAB_V.ORDR, PCYLIAB_V.CURRENT_YEAR
+            'FROM PCYLIAB_V INNER JOIN COMPANY ON PCYLIAB_V.COCODE = COMPANY.COCODE
+            'WHERE (((PCYLIAB_V.[COCODE])>9999) AND ((PCYLIAB_V.[LNCODE]) In (46,48,31,7)))
+            'ORDER BY PCYLIAB_V.COCODE, PCYLIAB_V.ORDR;
+
+            strSQL = " SELECT "
+            strSQL = strSQL & LiabTable & ".COCODE, "
+            strSQL = strSQL & LiabTable & ".Year, "
+            strSQL = strSQL & LiabTable & ".LNCODE, "
+            strSQL = strSQL & LiabTable & ".LINE_NO, "
+            strSQL = strSQL & LiabTable & ".ORDR, "
+            If i = 2 Then 'different column name for X filers
+                strSQL = strSQL & " TOT_CURR_YR AS CURRENT_YEAR "
+            Else
+                strSQL = strSQL & " CURRENT_YEAR "
+            End If
+            strSQL = strSQL & " FROM " & LiabTable
+            strSQL = strSQL & " INNER JOIN " & CoTbl & " ON " & LiabTable & ".COCODE = " & CoTbl & ".COCODE "
+            strSQL = strSQL & LiabWhere
+            strSQL = strSQL & " ORDER BY " & LiabTable & ".COCODE, " & LiabTable & ".ORDR "
+            strSQL = strSQL & " ; "
+
+            'create the query
+            Set n = ThisDB.CreateQueryDef(QueryName, strSQL)
+            SysCmd acSysCmdSetStatus, "Liab Qry " & QueryName & " created. SQL: " & strSQL
+        Next i
+
+        '****************** DUMP ASSET BALANCES ******************
+        SysCmd acSysCmdSetStatus, "Dumping Asset Balances for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+
+        If EXEC_DUMP_RECS Then
+            For Each n In XLWkBk.Sheets
+                If n.name = HistPeriod(H) & "-LIA" _
+                Or n.name = "LIA (2)" _
+                Or n.name = HistPeriod(H) & "-ASS" _
+                Or n.name = "ASS (2)" _
+                Then n.Delete
+            Next n
+
+            TmpSheetName = HistPeriod(H) & "-LIA" 'note that the worksheet name has to be EXaCT!
+            For Each n In XLWkBk.Sheets
+                If n.name = "LIA" Then
+                    n.Copy before:=n
+                    XLWkBk.Sheets("LIA (2)").name = TmpSheetName
+                    Exit For
+                End If
+            Next n
+            TmpSheetName = HistPeriod(H) & "-ASS" 'note that the worksheet name has to be EXaCT!
+            For Each n In XLWkBk.Sheets
+                If n.name = "ASS" Then
+                    n.Copy before:=n
+                    XLWkBk.Sheets("ASS (2)").name = TmpSheetName
+                    Exit For
+                End If
+            Next n
+            '
+            CurRecOffset = FirstDataRow
+            For i = 0 To MaxIndustries 'take care of the assets using existing queries
+                'TRANSFORM Sum(PCYPreAssets.NET_ADMTD_ASSTS_CURR_YR) AS SumOfNET_ADMTD_ASSTS_CURR_YR
+                'SELECT PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'FROM PCYPreAssets
+                'WHERE (((PCYPreAssets.cocode) > 9999))
+                'GROUP BY PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'ORDER BY PCYPreAssets.COCODE
+                'PIVOT PCYPreAssets.LNCODE;
+
+                TmpName = Industry(i) & HistPeriod(H) & "PreASSETS"
+                CurDumpSpot = AssetDumpCol & CStr(CurRecOffset)
+
+                strSQL = " TRANSFORM Sum(" & TmpName & ".NET_ADMTD_ASSTS_CURR_YR) AS SumOfNET_ADMTD_ASSTS_CURR_YR "
+                strSQL = strSQL & " SELECT "
+                strSQL = strSQL & TmpName & ".COCODE, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, " & TmpName & ".YEAR, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+                strSQL = strSQL & " FROM " & TmpName
+                If Industry(i) = "P" Then
+                    strSQL = strSQL & " WHERE (((" & TmpName & ".COCODE) > 9999)) "
+                End If
+                strSQL = strSQL & " GROUP BY " & TmpName & ".COCODE, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, " & TmpName & ".YEAR, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+    '            strSQL = strSQL & " ORDER BY " & TmpName & ".COCODE "
+                strSQL = strSQL & " PIVOT " & TmpName & ".LINE_NO ; " 'NB Changing this to Line Code screws up the sequence of columns in output
+
+                SysCmd acSysCmdSetStatus, "Moving Asset Info For " & Industry(i) & " industry (H: " & H & ", period " & HistPeriod(H) & "). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                If i = 0 Then
+                    XLWkBk.Sheets(TmpSheetName).Range(CurDumpSpot).Offset(-1, -1).Value = "INDUSTRY"
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, True, CurDumpSpot
+                Else
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, False, CurDumpSpot
+                End If
+
+                'insert the industry letter
+                With XLWkBk.Sheets(TmpSheetName)
+                    .Range(.Range(CurDumpSpot).Offset(0, -1), .Range(CurDumpSpot).Offset(RS.RecordCount - 1, -1)).Value = Industry(i)
+                End With
+                CurRecOffset = CurRecOffset + RS.RecordCount
+                Count(i) = RS.RecordCount
+                Set RS = Nothing
+            Next i
+
+            '****************** DUMP SHORT TERM INVESTMENT BALANCES  ******************
+            SysCmd acSysCmdSetStatus, "Dumping ST Invest Balaces for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+
+            CurRecOffset = FirstDataRow
+            For i = 0 To MaxIndustries 'take care of the assets using existing queries
+                'TRANSFORM Sum(PCYPreAssets.NET_ADMTD_ASSTS_CURR_YR) AS SumOfNET_ADMTD_ASSTS_CURR_YR
+                'SELECT PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'FROM PCYPreAssets
+                'WHERE (((PCYPreAssets.cocode) > 9999))
+                'GROUP BY PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'ORDER BY PCYPreAssets.COCODE
+                'PIVOT PCYPreAssets.LNCODE;
+
+                TmpName = Industry(i) & HistPeriod(H) & "PreASSETS2"
+                CurDumpSpot = DADumpCol & CStr(CurRecOffset)
+
+                'TmpSheetName = Industry(i) & "-ASS" 'note that the worksheet name has to be EXaCT!
+                If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then 'NB-Must change in future!!!  Where CY=2011, PY8 = 2003 and PY9 = 2002.
+                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_2) AS SumOfINSIDE_AMT_3 "
+                Else
+                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_3) AS SumOfINSIDE_AMT_3 "
+                End If
+                strSQL = strSQL & " SELECT "
+                strSQL = strSQL & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+                strSQL = strSQL & " FROM " & TmpName
+                If Industry(i) = "P" Then
+                    strSQL = strSQL & " WHERE (((" & TmpName & ".cocode) > 9999)) "
+                End If
+                strSQL = strSQL & " GROUP BY " & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+    '            strSQL = strSQL & " ORDER BY " & TmpName & ".COCODE "
+                strSQL = strSQL & " PIVOT " & TmpName & ".LINE_NO ; "
+
+                SysCmd acSysCmdSetStatus, "Moving ST Investment Info For " & Industry(i) & " industry (H: " & H & "). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                If i = 0 Then
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, True, CurDumpSpot
+                Else
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, False, CurDumpSpot
+                End If
+
+                CurRecOffset = CurRecOffset + RS.RecordCount
+                If Count(i) <> RS.RecordCount Then
+                    MsgBox "NOTE THORT TERM INVESTMENT LINES FOR THE " & Industry(i) & " INDUSTRY. " & vbCrLf & vbCrLf & _
+                    "PLEASE REVIEW FOR CONSISTENCHAT THE NUMBER OF DEBT RECORDS / COCODES DOES NOT " & vbCrLf & vbCrLf & _
+                    "MATCH THE NUMBER OF SY!!!"
+                End If
+                Set RS = Nothing
+            Next i
+            ' ################## DUMP CASH BALANCES  #######################################
+            SysCmd acSysCmdSetStatus, "Dumping Cash Balances for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+            CurRecOffset = FirstDataRow
+            For i = 0 To MaxIndustries 'take care of the assets using existing queries
+                'TRANSFORM Sum(PCYPreAssets.NET_ADMTD_ASSTS_CURR_YR) AS SumOfNET_ADMTD_ASSTS_CURR_YR
+                'SELECT PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'FROM PCYPreAssets
+                'WHERE (((PCYPreAssets.cocode) > 9999))
+                'GROUP BY PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'ORDER BY PCYPreAssets.COCODE
+                'PIVOT PCYPreAssets.LNCODE;
+
+                TmpName = Industry(i) & HistPeriod(H) & "PreASSETS3"
+                CurDumpSpot = CDumpCol & CStr(CurRecOffset)
+                'TmpSheetName = Industry(i) & "-ASS" 'note that the worksheet name has to be EXaCT!
+'                If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then 'NB-Must change in future!!!  Where CY=2011, PY8 = 2003 and PY9 = 2002.
+'                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_2) AS SumOfINSIDE_AMT_3 "
+'                Else
+'                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_3) AS SumOfINSIDE_AMT_3 "
+'                End If
+                strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_1) AS SumOfINSIDE_AMT_1 "
+                strSQL = strSQL & " SELECT "
+                strSQL = strSQL & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+                strSQL = strSQL & " FROM " & TmpName
+                If Industry(i) = "P" Then
+                    strSQL = strSQL & " WHERE (((" & TmpName & ".COCODE) > 9999)) "
+                End If
+                strSQL = strSQL & " GROUP BY " & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+    '            strSQL = strSQL & " ORDER BY " & TmpName & ".COCODE "
+                strSQL = strSQL & " PIVOT " & TmpName & ".LINE_NO ; "
+
+                SysCmd acSysCmdSetStatus, "Moving CASH Asset Info For " & Industry(i) & " industry (H: " & H & ", Period " & HistPeriod(H) & "). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                If i = 0 Then
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, True, CurDumpSpot
+                Else
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, False, CurDumpSpot
+                End If
+
+                CurRecOffset = CurRecOffset + RS.RecordCount
+                If Count(i) <> RS.RecordCount Then
+                    MsgBox "NOTE THAT THE NUMBER OF DEBT RECORDS / COCODES DOES NOT " & vbCrLf & vbCrLf & _
+                    "MATCH THE NUMBER OF SHORT TERM INVESTMENT LINES FOR THE " & Industry(i) & " INDUSTRY. " & vbCrLf & vbCrLf & _
+                    "PLEASE REVIEW FOR CONSISTENCY!!!"
+                End If
+                Set RS = Nothing
+            Next i
+            ' $$$$$$$$$$$$$$$$$ DUMP CASH EQUIVALENT BALANCES  $$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+            SysCmd acSysCmdSetStatus, "Dumping Cash Equivalent Balances for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+            
+            CurRecOffset = FirstDataRow
+            For i = 0 To MaxIndustries 'take care of the assets using existing queries
+                'TRANSFORM Sum(PCYPreAssets.NET_ADMTD_ASSTS_CURR_YR) AS SumOfNET_ADMTD_ASSTS_CURR_YR
+                'SELECT PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'FROM PCYPreAssets
+                'WHERE (((PCYPreAssets.cocode) > 9999))
+                'GROUP BY PCYPreAssets.COCODE, PCYPreAssets.STATE_OF_DOMICILE, PCYPreAssets.SHORT_COMPANY_NAME,
+                'PCYPreAssets.GROUP_CODE_ID, PCYPreAssets.GROUP_NAME
+                'ORDER BY PCYPreAssets.COCODE
+                'PIVOT PCYPreAssets.LNCODE;
+
+                TmpName = Industry(i) & HistPeriod(H) & "PreASSETS4"
+                CurDumpSpot = CEDumpCol & CStr(CurRecOffset)
+
+                'TmpSheetName = Industry(i) & "-ASS" 'note that the worksheet name has to be EXaCT!
+'                If HistPeriod(H) = "PY8" Or HistPeriod(H) = "PY9" Then 'NB-Must change in future!!!  Where CY=2011, PY8 = 2003 and PY9 = 2002.
+                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_2) AS SumOfINSIDE_AMT_2 "
+'                Else
+'                    strSQL = " TRANSFORM Sum(" & TmpName & ".INSIDE_AMT_3) AS SumOfINSIDE_AMT_3 "
+'                End If
+                strSQL = strSQL & " SELECT "
+                strSQL = strSQL & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+                strSQL = strSQL & " FROM " & TmpName
+                If Industry(i) = "P" Then
+                    strSQL = strSQL & " WHERE (((" & TmpName & ".cocode) > 9999)) "
+                End If
+                strSQL = strSQL & " GROUP BY " & TmpName & ".COCODE, " & TmpName & ".YEAR, " & TmpName & ".STATE_OF_DOMICILE, " & TmpName & ".SHORT_COMPANY_NAME, "
+                strSQL = strSQL & TmpName & ".GROUP_CODE_ID, " & TmpName & ".GROUP_NAME "
+    '            strSQL = strSQL & " ORDER BY " & TmpName & ".COCODE "
+                strSQL = strSQL & " PIVOT " & TmpName & ".LINE_NO ; "
+
+                SysCmd acSysCmdSetStatus, "Dumping Cash Equivalent Balance Info For " & Industry(i) & " industry (H: " & H & ", Period " & HistPeriod(H) & "). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                If i = 0 Then
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, True, CurDumpSpot
+                Else
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, False, CurDumpSpot
+                End If
+
+                CurRecOffset = CurRecOffset + RS.RecordCount
+                If Count(i) <> RS.RecordCount Then
+                    MsgBox "NOTE THAT THE NUMBER OF DEBT RECORDS / COCODES DOES NOT " & vbCrLf & vbCrLf & _
+                    "MATCH THE NUMBER OF SHORT TERM INVESTMENT LINES FOR THE " & Industry(i) & " INDUSTRY. " & vbCrLf & vbCrLf & _
+                    "PLEASE REVIEW FOR CONSISTENCY!!!"
+                End If
+                Set RS = Nothing
+            Next i
+            '****************** DUMP LIABILITY BALANCES  ******************
+            ' note that certain cocodes need to be removed manually for PY7 / 2004
+            CurRecOffset = FirstDataRow
+            TmpSheetName = HistPeriod(H) & "-LIA" 'note that the worksheet name has to be EXaCT!
+
+            For i = 0 To MaxIndustries
+                SysCmd acSysCmdSetStatus, "Dumping Liability Balances for Industry " & Industry(i) & " in period " & HistPeriod(H) & "."
+    ''            TmpName = Industry(i) & "CYLIAB_V" 'a direct I-Site Table
+                TmpName2 = Industry(i) & HistPeriod(H) & "PreLiab"  'a view I created
+                CurDumpSpot = LiabDumpCol & CStr(CurRecOffset)
+
+    ''''                    'SELECT PCYLIAB_V.COCODE, PCYLIAB_V.LNCODE, PCYLIAB_V.CURRENT_YEAR
+    ''''                    'FROM PCYLIAB_V
+    ''''                    'WHERE (((PCYLIAB_V.cocode) > 9999) And ((PCYLIAB_V.LNCODE) = 31))
+    ''''                    'ORDER BY PCYLIAB_V.COCODE;
+    ''''                    strSQL = " SELECT " & TmpName & ".COCODE, " & TmpName & ".LNCODE, " & TmpName & ".CURRENT_YEAR "
+    ''''                    strSQL = strSQL & " FROM " & TmpName & " "
+    ''''                    strSQL = strSQL & " WHERE (((" & TmpName & ".cocode) > 9999) And ((" & TmpName & ".LNCODE) = 31)) "
+    ''''                    strSQL = strSQL & " ORDER BY " & TmpName & ".COCODE; "
+    ''                    'TRANSFORM Sum(PCYPreLiab.CURRENT_YEAR) AS SumOfCURRENT_YEAR
+    ''                    'SELECT PCYPreLiab.COCODE
+    ''                    'FROM PCYPreLiab
+    ''                    'GROUP BY PCYPreLiab.COCODE
+    ''                    'ORDER BY PCYPreLiab.COCODE
+    ''                    'PIVOT PCYPreLiab.LNCODE;
+                strSQL = " TRANSFORM Sum(" & TmpName2 & ".CURRENT_YEAR) AS SumOfCURRENT_YEAR "
+                strSQL = strSQL & " SELECT "
+                strSQL = strSQL & TmpName2 & ".COCODE, " & TmpName2 & ".YEAR "
+                strSQL = strSQL & " FROM " & TmpName2 & " "
+                '###########################################################
+                'Updated 12/24/13 - CFahey
+                'this WHERE clause was added as a kluge because the COCODE counts for this particular
+                'year (2004) for this particular industry (P) did not match.
+                If HistPeriod(H) = "PY7" And Industry(i) = "P" Then
+                    strSQL = strSQL & " WHERE COCODE NOT IN (10117,10118,10156,10751,10764,11871,12180,12199,12224,12247,12256,12264,12280,12293, "
+                    strSQL = strSQL & " 12303,12317,12338,12519,12611,12746) "
+                End If
+                strSQL = strSQL & " GROUP BY " & TmpName2 & ".COCODE, " & TmpName2 & ".YEAR "
+                strSQL = strSQL & " ORDER BY " & TmpName2 & ".COCODE, " & TmpName2 & ".YEAR "
+                strSQL = strSQL & " PIVOT " & TmpName2 & ".LINE_NO ; "
+                
+'                If DEBUGON Then
+'                    Debug.Print "i = " & i & ", H = " & H
+'                    Debug.Print strSQL
+'                    Debug.Print vbCrLf
+'                End If
+
+                SysCmd acSysCmdSetStatus, "Moving Liability Info For " & Industry(i) & " industry (H: " & H & "). . . "
+                Set RS = ThisDB.OpenRecordset(strSQL, dbOpenDynaset, dbReadOnly)
+                If i = 0 Then
+                    XLWkBk.Sheets(TmpSheetName).Range(CurDumpSpot).Offset(-1, -1).Value = "INDUSTRY"
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, True, CurDumpSpot
+                Else
+                    MoveRecordsetToExcelFile XLWkBk, RS, TmpSheetName, TARGETXLFILE, False, CurDumpSpot
+                End If
+
+                'insert the industry letter
+                With XLWkBk.Sheets(TmpSheetName)
+                    .Range(.Range(CurDumpSpot).Offset(0, -1), .Range(CurDumpSpot).Offset(RS.RecordCount - 1, -1)).Value = Industry(i)
+                   ' .Range(.Range("A2"), .Range("A2").Offset(0, 5)).Select
+                    .Range(.Range("A2"), .Range("A2").Offset(0, 5)).Copy
+                    .Range(.Range(CurDumpSpot).Offset(0, -9), .Range(CurDumpSpot).Offset(RS.RecordCount - 1, -9)).PasteSpecial Paste:=xlPasteFormulas
+                End With
+
+                CurRecOffset = CurRecOffset + RS.RecordCount
+
+                If RS.RecordCount <> Count(i) Then
+                    MsgBox "There are different record counts in the " & Industry(i) & " Industry.  Please Check!" & vbCrLf & vbCrLf & "Aborting!"
+                    Debug.Print strSQL
+                    GoTo MyExit
+                End If
+            Next i
+        End If
+
+        'DateStamp the download
+        XLWkBk.Sheets("Locations").Range("C1").Value = Now()
+
+        'XLWksht.Calculate '= True
+'            If XLWkbk.Sheets("ChkSheet").Range("C3").Value <> 0 Or XLWkbk.Sheets("ChkSheet").Range("G3").Value <> 0 Or _
+'               XLWkbk.Sheets("ChkSheet").Range("K3").Value <> 0 Or XLWkbk.Sheets("ChkSheet").Range("O3").Value <> 0 Or _
+'               XLWkbk.Sheets("ChkSheet").Range("S3").Value <> 0 Then
+'                MsgBox "CoCodes do NOT appear to match properly!!!"
+'            End If
+
+        'lastly, clear out the queries that we made (Except for the CY queries)
+        If H > 7 Then
+            For i = 0 To MaxIndustries
+                QueryName = Industry(i) & HistPeriod(H) & "PreAssets"
+                K = DropDAOQuery(ThisDB, QueryName)
+                QueryName = Industry(i) & HistPeriod(H) & "PreAssets2"
+                K = DropDAOQuery(ThisDB, QueryName)
+'                QueryName = Industry(i) & HistPeriod(H) & "PreAssets3"
+'                K = DropDAOQuery(ThisDB, QueryName)
+'                QueryName = Industry(i) & HistPeriod(H) & "PreAssets4"
+'                K = DropDAOQuery(ThisDB, QueryName)
+                QueryName = Industry(i) & HistPeriod(H) & "PreLiab"
+                K = DropDAOQuery(ThisDB, QueryName)
+            Next i
+        End If
+    Next H
+
+    If EXEC_DUMP_RECS Then
+        RS.Close
+        ThisDB.Close
+    End If
+    'XLWkbk.Sheets("InsurerInfo").Select
+    'XLWkbk.Sheets("ChkSheet").Select
+
+    XLWkBk.SaveAs FileName:=NewTargetFileName, FileFormat:=xlOpenXMLWorkbookMacroEnabled 'xlExcel12 ' & ".xlsm"    'SaveWorkspace TARGETFILENAME & ".xlsm"
+'    XLWkbk.Close SaveChanges:=True  'CHange this when working to true!
+    XLApp.Quit
+    obTimer.StopTimer
+    MyTime = obTimer.Elapsed
+    SysCmd acSysCmdSetStatus, "Transfer of YE Insurer data from I-SITE to Excel is complete! Run Time: " & Round(MyTime, 2) & " seconds, or " & Round(MyTime / 60, 2) & " minutes."
+
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+     SysCmd acSysCmdSetStatus, "Error #" & Err.Number & "H: " & H & "I: " & i & Err.Description
+    Err.Clear
+
+MyExit:
+    Set n = Nothing
+    Set XLApp = Nothing
+    Set XLWkBk = Nothing
+    Set XLWkSht = Nothing
+    Set xlSourceWksht = Nothing
+    Set xlCopiedWksht = Nothing
+    Set RS = Nothing
+    Set ThisDB = Nothing
+    'Set LocalDB = Nothing
+    Set obTimer = Nothing
+End Sub
+
+Sub MoveRecordsetToExcelFile(ByRef ipXLWkBk As Excel.Workbook, ByRef ipRSet As Recordset, ipSheetName As String, Optional ipWrkbookName As String, Optional ipProvideHeaders As Boolean = False, Optional ipInitCell As String)
+'modified 4/10/11 by cfahey
+'this function is passed an excel workbook handle and moves data from a recordset to an excel spreadsheet
+'one can specify the top left cell, the file name, and the spreadsheet name
+Dim XLWkSht As Excel.Worksheet
+Dim i, j As Byte
+Dim TotalQrys As Long
+Dim TotalRecs As Long
+Dim FirstCell As String
+Dim FoundSheet As Boolean
+
+Const HeadingRow = 0
+    'Incorporate Parameters, where needed
+    If Len(ipInitCell) = 0 Then
+        FirstCell = "A7"
+    Else
+        FirstCell = ipInitCell
+    End If
+
+    'Find and move to the correct worksheet.  If the worksheet doesn't exist, create it
+    For i = 1 To ipXLWkBk.Worksheets.Count
+        If ipXLWkBk.Worksheets(i).name = ipSheetName Then
+            Set XLWkSht = ipXLWkBk.Worksheets(i)
+            FoundSheet = True
+            Exit For
+        End If
+    Next i
+    If FoundSheet = False Then 'the worksheet wasn't found in the file, so add it
+        Set XLWkSht = ipXLWkBk.Worksheets.Add
+        XLWkSht.name = ipSheetName
+    End If
+    XLWkSht.Activate
+
+    'just move the data!
+    XLWkSht.Range(FirstCell).CopyFromRecordset ipRSet
+    If ipProvideHeaders And XLWkSht.Range(FirstCell).Row <> 1 Then CopyRSHeaders ipRSet, XLWkSht, XLWkSht.Range(FirstCell).Offset(-1, 0).Address 'this dump is not on the top row, so dump the headings!
+
+MyExit:
+    Set XLWkSht = Nothing
+End Sub
+
+Function TableExists(ipFileName As String, ipTableName As String) As Byte
+'written 11/2/11 by cfahey
+'this returns a 1 (true) if a table exists in a given Access file, 0 (false) otherwise
+Dim MyDB As DAO.Database
+Dim n As Object
+Dim name As String
+    ipTableName = CleanFileName(ipTableName)
+    TableExists = 0
+    If Len(Dir$(ipFileName)) > 0 Then
+        Set MyDB = OpenDatabase(CleanFileName(ipFileName), dbOpenDynaset)
+    
+        'TableExists = 0
+        For Each n In MyDB.TableDefs
+            name = n.name
+            
+            If n.name = ipTableName Then
+                TableExists = 1
+                Exit For
+            End If
+        Next n
+        MyDB.Close
+    End If
+MyExit:
+    Set n = Nothing
+    Set MyDB = Nothing
+End Function
+
+Function DropDAOQuery(ByRef ipDB As DAO.Database, ipQueryName As String) As Integer
+On Error GoTo ErrorHandler
+'written 11/2/11 by cfahey
+'this returns a 0 if the table is found and deleted, 1 if a table was not found, and -1 if an error is produced
+'Dim wrkJet As dao.Workspace
+'Dim MyDb As dao.Database
+Dim n As Object
+
+    DropDAOQuery = 1
+    For Each n In ipDB.QueryDefs
+        If n.name = ipQueryName Then
+            ipDB.Execute "Drop table " & ipQueryName
+            DropDAOQuery = 0
+            Exit For
+        End If
+    Next n
+    GoTo MyExit
+
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    DropDAOQuery = -1
+
+MyExit:
+    Set n = Nothing
+End Function
+
+Function DropExistingTable(ByVal ipFileName As String, ipTableName As String) As Integer
+On Error GoTo ErrorHandler
+'written 11/2/11 by cfahey
+'this returns a 0 if the table is found and deleted, 1 if a table was not found, and -1 if an error is produced
+Dim wrkJet As DAO.Workspace
+Dim MyDB As DAO.Database
+Dim MyTd As TableDefs
+Dim n As Object
+
+    ipFileName = CleanFileName(ipFileName)
+    Set wrkJet = CreateWorkspace("MyWorkSpace", "admin", "", dbUseJet)
+    Set MyDB = wrkJet.OpenDatabase(ipFileName, dbOpenDynaset)
+
+    DropExistingTable = 1
+    For Each n In MyDB.TableDefs
+        If n.name = ipTableName Then
+            MyDB.Execute "Drop table " & ipTableName
+            DropExistingTable = 0
+            GoTo MyExit
+        End If
+    Next n
+    GoTo MyExit
+ErrorHandler:
+    MsgBox "Error #" & Err.Number & vbCrLf & vbCrLf & Err.Description
+    Err.Clear
+    DropExistingTable = -1
+MyExit:
+    Set n = Nothing
+    Set MyTd = Nothing
+    MyDB.Close
+    Set MyDB = Nothing
+End Function
+
+Function CleanFileName(ipFileName As String) As String
+    'first, ensure that the filename is specified correctly! leading spaces and single quote markes can mess things up!
+    CleanFileName = ipFileName
+    Do While Left(CleanFileName, 1) = " "
+        CleanFileName = Right(CleanFileName, Len(CleanFileName) - 1)
+    Loop
+    
+    Do While Right(CleanFileName, 1) = " "
+        CleanFileName = Left(CleanFileName, Len(CleanFileName) - 1)
+    Loop
+    
+    If Left(CleanFileName, 1) = "'" Then  'fix the file name!
+        CleanFileName = Right(CleanFileName, Len(CleanFileName) - 1)
+    End If
+    
+    If Right(CleanFileName, 1) = "'" Then  'fix the file name!
+        CleanFileName = Left(CleanFileName, Len(CleanFileName) - 1)
+    End If
+End Function
+
+Function TrimMyString(ByVal ipStr As String) As String
+    Do While Left(ipStr, 1) = " "
+        ipStr = Right(ipStr, Len(ipStr) - 1)
+    Loop
+    
+    Do While Right(ipStr, 1) = " "
+        ipStr = Left(ipStr, Len(ipStr) - 1)
+    Loop
+    TrimMyString = ipStr
+End Function
+
+Function TableIsInThisDB(ipDB As DAO.Database, ipTableName As String) As Byte
+'written 5/7/12 by cfahey
+'this returns a 1 (true) if a table exists in a given Access file, 0 (false) otherwise
+Dim n As Object
+    
+    TableIsInThisDB = 0
+    For Each n In ipDB.TableDefs
+        If n.name = ipTableName Then
+            TableIsInThisDB = 1
+            Exit For
+        End If
+    Next n
+
+MyExit:
+    Set n = Nothing
+End Function
+

@@ -1,0 +1,23 @@
+                                       Notes for the DailyData Workbook
+		   
+This project came out of my experience tracking down benchmark values for the NAIC's capital markets daily newsletter.  
+In each newsletter, there was a summary of market benchmarks - the S&P 500, Dow, Dollar - Sterling, Dollar - Yen, 
+Crude, LIBOR rate, 10 year bond, etc. Tracking down these values on internet websites, and verifying the correctness 
+of the values could take 45 minutes or more. It was tedious and error-prone. 
+
+The DailyData spreadsheet used the download feature of the Bloomberg terminal to speed this task. When the workbook 
+is opened, an "Open Workbook" macro is run. If a directory exists on the "C:" drive, the worksheet deduces that it 
+is at a Bloomberg terminal and a form is presented, after several queries are run to retrieve the desired index 
+values. It then prompts the user to accept the values returned.  If certain values are missing, the user has the 
+chance to again calculate the benchmark values. This can be repeated as many times as is required to get a complete 
+data set.  The values are then saved to the approporiate worksheets, which effectively serve as databases, and the 
+workbook is saved (ideally to a flashdrive) and the file closed. 
+
+Next, the user goes to his or her own computer and inserts the flash drive with the updated file. The "open workbook" 
+macro is again run, and upon finding that the directory specific to Bloomberg terminals does not exist, it opens up 
+a different form, and then jumps immediately to the relevant spreadsheet, inserts the relevant date, selects the 
+relevant cells, and issues a "Copy" command.  The user merely has to then go to the word document which contains the 
+newsletter commentary, and "Paste" the table in, in whatever format is required. 
+
+With this spreadsheet, what had been a time-consuming, error prone, and close to deadline a stressful process is 
+reduced to a leisurely, relatively stress free, fast, accurate, and relatively mindless process. 
